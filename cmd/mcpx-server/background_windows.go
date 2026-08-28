@@ -30,11 +30,15 @@ func terminateBackgroundProcess(pid int, executable string, timeout time.Duratio
 	if err != nil {
 		return false, err
 	}
-	if !alive {
+	if !alive || !matches {
+		// PID 已经不存在，或者还活着但镜像名不是我们的可执行文件——后者说明
+		// 这个 PID 已被系统复用给了别的程序。两种情况都意味着状态文件里记录的
+		// daemon 早就没了，属于陈旧记录，调用方据此丢弃即可。
+		//
+		// 这里绝不能报错：报错会让调用方在删除状态文件之前就早退，陈旧记录
+		// 永远留在盘上，后续每一次 `mcpx -d` 都会重复失败。也绝不能对不匹配的
+		// 进程发信号——那是别人的进程。
 		return false, nil
-	}
-	if !matches {
-		return false, fmt.Errorf("pid %d no longer matches daemon executable %s", pid, executable)
 	}
 	process, err := os.FindProcess(pid)
 	if err != nil {
