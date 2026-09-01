@@ -18,6 +18,7 @@ import (
 	"mcpx/internal/file"
 	"mcpx/internal/security"
 	"mcpx/internal/source"
+	"mcpx/internal/winproc"
 )
 
 func (r *Runtime) toolProjectInspect(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -176,6 +177,7 @@ func boundedCommand(parent context.Context, workDir, name string, args ...string
 	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, name, args...)
+	winproc.ConfigureNoWindow(command)
 	command.Dir = workDir
 	output, err := command.CombinedOutput()
 	if err != nil && len(output) == 0 {

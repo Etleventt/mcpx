@@ -16,6 +16,7 @@ import (
 
 	"mcpx/internal/config"
 	"mcpx/internal/observation"
+	"mcpx/internal/winproc"
 )
 
 type workspaceObserverOptions struct {
@@ -315,6 +316,7 @@ func terminalSize() (columns, rows int) {
 		return columns, rows
 	}
 	command := exec.Command("stty", "size")
+	winproc.ConfigureNoWindow(command)
 	command.Stdin = os.Stdin
 	output, err := command.Output()
 	if err != nil {

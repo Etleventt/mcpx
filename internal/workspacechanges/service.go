@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"mcpx/internal/winproc"
 )
 
 var ErrNotGitRepository = errors.New("workspace is not a Git repository")
@@ -352,6 +354,7 @@ func statusName(x, y string) string {
 func gitOutput(ctx context.Context, workspaceRoot string, args ...string) (string, error) {
 	commandArgs := append([]string{"-C", workspaceRoot}, args...)
 	command := exec.CommandContext(ctx, "git", commandArgs...)
+	winproc.ConfigureNoWindow(command)
 	output, err := command.Output()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)

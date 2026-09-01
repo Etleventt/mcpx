@@ -20,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"mcpx/internal/winproc"
 )
 
 const (
@@ -377,6 +379,7 @@ func writeExtractedBinary(destination string, source io.Reader, size int64) erro
 
 func verifyExecutable(path, version string) error {
 	command := exec.Command(path, "-version")
+	winproc.ConfigureNoWindow(command)
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s -version failed: %w: %s", path, err, strings.TrimSpace(string(output)))

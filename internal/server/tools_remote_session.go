@@ -19,6 +19,7 @@ import (
 	"mcpx/internal/config"
 	"mcpx/internal/envelope"
 	"mcpx/internal/remotesession"
+	"mcpx/internal/winproc"
 	"mcpx/internal/workspacechanges"
 )
 
@@ -264,10 +265,14 @@ func workspaceRevision(parent context.Context, path string) (head, digest string
 			rootPath = filepath.Join(path, root)
 			label = root + ":"
 		}
-		if out, err := exec.CommandContext(ctx, "git", "-C", rootPath, "rev-parse", "HEAD").Output(); err == nil {
+		headCommand := exec.CommandContext(ctx, "git", "-C", rootPath, "rev-parse", "HEAD")
+		winproc.ConfigureNoWindow(headCommand)
+		if out, err := headCommand.Output(); err == nil {
 			heads = append(heads, label+strings.TrimSpace(string(out)))
 		}
-		if out, err := exec.CommandContext(ctx, "git", "-C", rootPath, "status", "--porcelain=v2", "-z").Output(); err == nil {
+		statusCommand := exec.CommandContext(ctx, "git", "-C", rootPath, "status", "--porcelain=v2", "-z")
+		winproc.ConfigureNoWindow(statusCommand)
+		if out, err := statusCommand.Output(); err == nil {
 			statusParts = append(statusParts, label+string(out))
 		}
 	}

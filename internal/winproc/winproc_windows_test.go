@@ -5,9 +5,57 @@ package winproc
 import (
 	"os"
 	"os/exec"
+	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
+
+// TestConfigureNoWindow 验证无窗口配置会设置目标标志、清除冲突标志并保留其他标志。
+func TestConfigureNoWindow(t *testing.T) {
+	cmd := &exec.Cmd{
+		SysProcAttr: &syscall.SysProcAttr{
+			CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.DETACHED_PROCESS | windows.CREATE_NEW_CONSOLE,
+		},
+	}
+
+	ConfigureNoWindow(cmd)
+
+	if cmd.SysProcAttr == nil {
+		t.Fatal("ConfigureNoWindow 必须初始化 SysProcAttr")
+	}
+	if !cmd.SysProcAttr.HideWindow {
+		t.Fatal("ConfigureNoWindow 必须设置 HideWindow")
+	}
+	flags := cmd.SysProcAttr.CreationFlags
+	if flags&windows.CREATE_NO_WINDOW == 0 {
+		t.Fatal("ConfigureNoWindow 必须设置 CREATE_NO_WINDOW")
+	}
+	if flags&(windows.DETACHED_PROCESS|windows.CREATE_NEW_CONSOLE) != 0 {
+		t.Fatal("ConfigureNoWindow 必须清除 DETACHED_PROCESS 和 CREATE_NEW_CONSOLE")
+	}
+	if flags&windows.CREATE_NEW_PROCESS_GROUP == 0 {
+		t.Fatal("ConfigureNoWindow 不得清除 CREATE_NEW_PROCESS_GROUP 等其他标志")
+	}
+}
+
+// TestConfigureNoWindowInitializesAttributes 验证缺少 SysProcAttr 时会自动创建配置对象。
+func TestConfigureNoWindowInitializesAttributes(t *testing.T) {
+	cmd := &exec.Cmd{}
+
+	ConfigureNoWindow(cmd)
+
+	if cmd.SysProcAttr == nil {
+		t.Fatal("SysProcAttr 不能为空")
+	}
+	if !cmd.SysProcAttr.HideWindow {
+		t.Fatal("必须设置 HideWindow")
+	}
+	if cmd.SysProcAttr.CreationFlags&windows.CREATE_NO_WINDOW == 0 {
+		t.Fatal("必须设置 CREATE_NO_WINDOW")
+	}
+}
 
 // sleepHelperEnv 让测试二进制以"长活子进程"的身份重新执行自己，
 // 用来提供一个真实可控的 PID。

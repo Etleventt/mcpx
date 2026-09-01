@@ -12,11 +12,31 @@ package winproc
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"golang.org/x/sys/windows"
 )
+
+// ConfigureNoWindow 配置命令以无窗口方式启动。
+//
+// CREATE_NO_WINDOW 与 DETACHED_PROCESS、CREATE_NEW_CONSOLE 互相冲突；清除后两者
+// 才能确保前者生效，同时保留 CREATE_NEW_PROCESS_GROUP 等其他创建标志。
+func ConfigureNoWindow(cmd *exec.Cmd) {
+	if cmd == nil {
+		return
+	}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+
+	attrs := cmd.SysProcAttr
+	attrs.HideWindow = true
+	attrs.CreationFlags &^= windows.DETACHED_PROCESS | windows.CREATE_NEW_CONSOLE
+	attrs.CreationFlags |= windows.CREATE_NO_WINDOW
+}
 
 // State 报告 pid 是否存活，以及该进程的镜像名是否就是 executable 的文件名。
 //

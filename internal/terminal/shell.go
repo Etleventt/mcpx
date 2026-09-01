@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"mcpx/internal/winproc"
 )
 
 // ExecutionShell returns the shell used for command-string execution.
@@ -43,7 +45,10 @@ func ExecutionShell() string {
 
 func commandShell(ctx context.Context, command string) *exec.Cmd {
 	if runtime.GOOS == "windows" {
-		return exec.CommandContext(ctx, "cmd", "/C", command)
+		cmd := exec.CommandContext(ctx, "cmd", "/C", command)
+		// Windows 下隐藏命令窗口，避免后台任务启动时打扰用户桌面。
+		winproc.ConfigureNoWindow(cmd)
+		return cmd
 	}
 	return exec.CommandContext(ctx, ExecutionShell(), "-lc", command)
 }

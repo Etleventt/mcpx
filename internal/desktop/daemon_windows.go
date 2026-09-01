@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"mcpx/internal/config"
@@ -180,15 +179,15 @@ func portListening(addr string) bool {
 	return true
 }
 
-// runSelf 以隐藏窗口的方式调用自己的子命令。HideWindow 是必需的：
-// 托盘进程已经脱离控制台，子进程若自带控制台会闪出一个黑框。
+// runSelf 以隐藏窗口的方式调用自己的子命令。托盘进程已经脱离控制台，
+// 子进程若自带控制台会闪出一个黑框，因此统一使用无窗口配置。
 func runSelf(args ...string) (string, error) {
 	executable, err := selfExecutable()
 	if err != nil {
 		return "", err
 	}
 	command := exec.Command(executable, args...)
-	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	winproc.ConfigureNoWindow(command)
 	output, err := command.CombinedOutput()
 	text := strings.TrimSpace(string(output))
 	if err != nil {

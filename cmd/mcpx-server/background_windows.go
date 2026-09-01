@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"syscall"
 	"time"
 
 	"mcpx/internal/winproc"
@@ -14,11 +13,12 @@ import (
 
 const (
 	createNewProcessGroup = 0x00000200
-	detachedProcess       = 0x00000008
 )
 
 func configureBackgroundProcess(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewProcessGroup | detachedProcess}
+	// 复用统一的无窗口配置，再保留 daemon 所需的独立进程组。
+	winproc.ConfigureNoWindow(cmd)
+	cmd.SysProcAttr.CreationFlags |= createNewProcessGroup
 }
 
 func terminateBackgroundProcess(pid int, executable string, timeout time.Duration) (bool, error) {
