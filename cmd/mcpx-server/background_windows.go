@@ -6,11 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
+
+	"mcpx/internal/winproc"
 )
 
 const (
@@ -65,19 +64,12 @@ func discoverBackgroundProcesses(executable string) ([]int, error) {
 	return nil, nil
 }
 
+// windowsBackgroundProcessState 走 Win32 API 查询，不解析 `tasklist` 的文本输出。
+//
+// 曾经的实现靠 `strings.HasPrefix(line, "INFO:")` 判断"进程不存在"，但那行提示
+// 会随系统显示语言本地化：中文 Windows 输出 GBK 编码的"信息: 没有运行的任务…"，
+// 前缀匹配永远失败。结果是进程被判定为始终存活，`mcpx stop` 必然等到超时报
+// "did not exit after kill"，镜像名也会取到乱码而误报 "no longer matches"。
 func windowsBackgroundProcessState(pid int, executable string) (bool, bool, error) {
-	output, err := exec.Command("tasklist", "/FI", "PID eq "+strconv.Itoa(pid), "/FO", "CSV", "/NH").Output()
-	if err != nil {
-		return false, false, err
-	}
-	line := strings.TrimSpace(string(output))
-	if line == "" || strings.HasPrefix(line, "INFO:") {
-		return false, false, nil
-	}
-	first := line
-	if index := strings.Index(first, ","); index >= 0 {
-		first = first[:index]
-	}
-	image := strings.Trim(first, "\" ")
-	return true, strings.EqualFold(image, filepath.Base(executable)), nil
+	return winproc.State(pid, executable)
 }

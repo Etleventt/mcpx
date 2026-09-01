@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"mcpx/internal/config"
+	"mcpx/internal/winproc"
 )
 
 const (
@@ -151,32 +152,22 @@ func readDaemonState(path string) (daemonState, error) {
 	return state, nil
 }
 
-// processAlive 用 tasklist 判断 PID 是否存活，并校验镜像名是否就是 mcpx。
-// 逻辑与 cmd/mcpx-server/background_windows.go 的 windowsBackgroundProcessState
-// 一致：只比对镜像名可以挡住 PID 被系统复用后误杀无关进程的情况。
+// processAlive 判断 PID 是否存活，并校验镜像名是否就是 mcpx。
+// 只比对镜像名可以挡住 PID 被系统复用后误判的情况。
+//
+// 与 cmd/mcpx-server 共用 internal/winproc：这段判断必须走 Win32 API，
+// 解析 `tasklist` 的文本输出会在非英文 Windows 上稳定误判。
 func processAlive(pid int, executable string) (alive bool, matches bool) {
-	if pid <= 0 {
-		return false, false
+	if executable == "" {
+		// 状态文件没记可执行路径时无从校验身份，只看存活性。
+		alive, _, err := winproc.State(pid, "")
+		return alive, err == nil && alive
 	}
-	command := exec.Command("tasklist", "/FI", "PID eq "+strconv.Itoa(pid), "/FO", "CSV", "/NH")
-	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	output, err := command.Output()
+	alive, matches, err := winproc.State(pid, executable)
 	if err != nil {
 		return false, false
 	}
-	line := strings.TrimSpace(string(output))
-	if line == "" || strings.HasPrefix(line, "INFO:") {
-		return false, false
-	}
-	first := line
-	if index := strings.Index(first, ","); index >= 0 {
-		first = first[:index]
-	}
-	image := strings.Trim(first, "\" ")
-	if executable == "" {
-		return true, true
-	}
-	return true, strings.EqualFold(image, filepath.Base(executable))
+	return alive, matches
 }
 
 // portListening 拨一次监听端口，确认服务真的可以接受连接。

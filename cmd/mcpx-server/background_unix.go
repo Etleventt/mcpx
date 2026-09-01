@@ -59,10 +59,32 @@ func terminateBackgroundProcess(pid int, executable string, timeout time.Duratio
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	// 升级到 SIGKILL 之前必须再确认一次身份：SIGTERM 之后 daemon 可能已经退出，
+	// 而这个 PID 被系统复用给了别的程序，此时 SIGKILL 打的就是无关进程。
+	if backgroundProcessGone(pid, executable) {
+		return true, nil
+	}
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return false, fmt.Errorf("kill daemon pid %d: %w", pid, err)
 	}
 	return true, nil
+}
+
+// backgroundProcessGone 判断"这个 PID 上已经没有我们的 daemon 了"——进程不存在，
+// 或者还在但命令行已经不是我们的可执行文件（PID 被系统复用给了别的程序）。
+// 后者同样意味着 daemon 已经退出，绝不能再对这个 PID 发信号。
+func backgroundProcessGone(pid int, executable string) bool {
+	alive, err := backgroundProcessAlive(pid)
+	if err != nil || !alive {
+		return true
+	}
+	matches, err := backgroundProcessMatches(pid, executable)
+	if err != nil {
+		// 查不出身份时保守认为它还是我们的 daemon，交给调用方继续等待，
+		// 而不是据此升级到 SIGKILL。
+		return false
+	}
+	return !matches
 }
 
 func backgroundProcessAlive(pid int) (bool, error) {
