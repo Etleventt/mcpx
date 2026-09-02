@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"mcpx/internal/winproc"
 )
 
 type Display struct {
@@ -191,7 +193,10 @@ func displayCommand(parent context.Context, timeout time.Duration, name string, 
 	}
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
-	output, _ := exec.CommandContext(ctx, name, args...).Output()
+	command := exec.CommandContext(ctx, name, args...)
+	// Windows 下隐藏显示器探测命令创建的控制台窗口；其他系统为空操作。
+	winproc.ConfigureNoWindow(command)
+	output, _ := command.Output()
 	return output
 }
 

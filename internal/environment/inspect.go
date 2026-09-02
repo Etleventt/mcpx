@@ -16,6 +16,7 @@ import (
 	"mcpx/internal/screenshot"
 	"mcpx/internal/terminal"
 	buildversion "mcpx/internal/version"
+	"mcpx/internal/winproc"
 )
 
 var ValidSections = []string{
@@ -312,7 +313,10 @@ func inspectToolchains(ctx context.Context) map[string]ToolchainInfo {
 func commandOutput(parent context.Context, name string, args ...string) string {
 	ctx, cancel := context.WithTimeout(parent, 1500*time.Millisecond)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	command := exec.CommandContext(ctx, name, args...)
+	// Windows 下隐藏环境探测命令创建的控制台窗口；其他系统为空操作。
+	winproc.ConfigureNoWindow(command)
+	output, err := command.CombinedOutput()
 	if err != nil && len(output) == 0 {
 		return ""
 	}

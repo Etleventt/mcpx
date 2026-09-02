@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"mcpx/internal/winproc"
 )
 
 func captureNative(parent context.Context, request Request, outputPath string) error {
@@ -43,6 +45,8 @@ func captureNative(parent context.Context, request Request, outputPath string) e
 	default:
 		return fmt.Errorf("screenshots are not supported on %s", runtime.GOOS)
 	}
+	// Windows 下隐藏截图命令创建的控制台窗口；其他系统为空操作。
+	winproc.ConfigureNoWindow(command)
 	output, err := command.CombinedOutput()
 	if err != nil {
 		message := strings.TrimSpace(string(output))

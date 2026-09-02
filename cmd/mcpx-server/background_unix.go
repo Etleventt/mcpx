@@ -34,7 +34,13 @@ func terminateBackgroundProcess(pid int, executable string, timeout time.Duratio
 		return false, fmt.Errorf("verify daemon pid %d: %w", pid, err)
 	}
 	if !matches {
-		return false, fmt.Errorf("pid %d no longer matches daemon executable %s", pid, executable)
+		// 进程还活着，但命令行不是我们的可执行文件，说明这个 PID 已经被系统
+		// 复用给了别的程序。状态文件里的记录是陈旧的，调用方据此丢弃即可。
+		//
+		// 这里绝不能报错：报错会让调用方在删除状态文件之前就早退，陈旧记录
+		// 永远留在盘上，后续每一次 `mcpx -d` 都会重复失败。也绝不能对不匹配的
+		// 进程发信号——那是别人的进程。
+		return false, nil
 	}
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
 		if errors.Is(err, syscall.ESRCH) {
@@ -53,10 +59,32 @@ func terminateBackgroundProcess(pid int, executable string, timeout time.Duratio
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	// 升级到 SIGKILL 之前必须再确认一次身份：SIGTERM 之后 daemon 可能已经退出，
+	// 而这个 PID 被系统复用给了别的程序，此时 SIGKILL 打的就是无关进程。
+	if backgroundProcessGone(pid, executable) {
+		return true, nil
+	}
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return false, fmt.Errorf("kill daemon pid %d: %w", pid, err)
 	}
 	return true, nil
+}
+
+// backgroundProcessGone 判断"这个 PID 上已经没有我们的 daemon 了"——进程不存在，
+// 或者还在但命令行已经不是我们的可执行文件（PID 被系统复用给了别的程序）。
+// 后者同样意味着 daemon 已经退出，绝不能再对这个 PID 发信号。
+func backgroundProcessGone(pid int, executable string) bool {
+	alive, err := backgroundProcessAlive(pid)
+	if err != nil || !alive {
+		return true
+	}
+	matches, err := backgroundProcessMatches(pid, executable)
+	if err != nil {
+		// 查不出身份时保守认为它还是我们的 daemon，交给调用方继续等待，
+		// 而不是据此升级到 SIGKILL。
+		return false
+	}
+	return !matches
 }
 
 func backgroundProcessAlive(pid int) (bool, error) {

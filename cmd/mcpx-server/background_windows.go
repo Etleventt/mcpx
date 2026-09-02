@@ -6,20 +6,19 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strconv"
-	"strings"
-	"syscall"
 	"time"
+
+	"mcpx/internal/winproc"
 )
 
 const (
 	createNewProcessGroup = 0x00000200
-	detachedProcess       = 0x00000008
 )
 
 func configureBackgroundProcess(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewProcessGroup | detachedProcess}
+	// 复用统一的无窗口配置，再保留 daemon 所需的独立进程组。
+	winproc.ConfigureNoWindow(cmd)
+	cmd.SysProcAttr.CreationFlags |= createNewProcessGroup
 }
 
 func terminateBackgroundProcess(pid int, executable string, timeout time.Duration) (bool, error) {
@@ -30,11 +29,15 @@ func terminateBackgroundProcess(pid int, executable string, timeout time.Duratio
 	if err != nil {
 		return false, err
 	}
-	if !alive {
+	if !alive || !matches {
+		// PID 已经不存在，或者还活着但镜像名不是我们的可执行文件——后者说明
+		// 这个 PID 已被系统复用给了别的程序。两种情况都意味着状态文件里记录的
+		// daemon 早就没了，属于陈旧记录，调用方据此丢弃即可。
+		//
+		// 这里绝不能报错：报错会让调用方在删除状态文件之前就早退，陈旧记录
+		// 永远留在盘上，后续每一次 `mcpx -d` 都会重复失败。也绝不能对不匹配的
+		// 进程发信号——那是别人的进程。
 		return false, nil
-	}
-	if !matches {
-		return false, fmt.Errorf("pid %d no longer matches daemon executable %s", pid, executable)
 	}
 	process, err := os.FindProcess(pid)
 	if err != nil {
@@ -61,19 +64,12 @@ func discoverBackgroundProcesses(executable string) ([]int, error) {
 	return nil, nil
 }
 
+// windowsBackgroundProcessState 走 Win32 API 查询，不解析 `tasklist` 的文本输出。
+//
+// 曾经的实现靠 `strings.HasPrefix(line, "INFO:")` 判断"进程不存在"，但那行提示
+// 会随系统显示语言本地化：中文 Windows 输出 GBK 编码的"信息: 没有运行的任务…"，
+// 前缀匹配永远失败。结果是进程被判定为始终存活，`mcpx stop` 必然等到超时报
+// "did not exit after kill"，镜像名也会取到乱码而误报 "no longer matches"。
 func windowsBackgroundProcessState(pid int, executable string) (bool, bool, error) {
-	output, err := exec.Command("tasklist", "/FI", "PID eq "+strconv.Itoa(pid), "/FO", "CSV", "/NH").Output()
-	if err != nil {
-		return false, false, err
-	}
-	line := strings.TrimSpace(string(output))
-	if line == "" || strings.HasPrefix(line, "INFO:") {
-		return false, false, nil
-	}
-	first := line
-	if index := strings.Index(first, ","); index >= 0 {
-		first = first[:index]
-	}
-	image := strings.Trim(first, "\" ")
-	return true, strings.EqualFold(image, filepath.Base(executable)), nil
+	return winproc.State(pid, executable)
 }

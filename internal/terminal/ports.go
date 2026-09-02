@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"mcpx/internal/winproc"
 )
 
 type Port struct {
@@ -22,7 +24,10 @@ func ListeningPorts(ctx context.Context, pid int) ([]Port, error) {
 		return nil, fmt.Errorf("task has no process id")
 	}
 	if runtime.GOOS == "windows" {
-		output, err := exec.CommandContext(ctx, "netstat", "-ano", "-p", "tcp").Output()
+		cmd := exec.CommandContext(ctx, "netstat", "-ano", "-p", "tcp")
+		// 查询端口时同样隐藏 netstat 的控制台窗口。
+		winproc.ConfigureNoWindow(cmd)
+		output, err := cmd.Output()
 		if err != nil {
 			return nil, fmt.Errorf("run netstat: %w", err)
 		}

@@ -14,6 +14,7 @@ import (
 	"mcpx/internal/config"
 	"mcpx/internal/logging"
 	buildversion "mcpx/internal/version"
+	"mcpx/internal/winproc"
 )
 
 const (
@@ -267,6 +268,8 @@ func connect(ctx context.Context, srv config.MCPServer, timeout time.Duration, o
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 
 	cmd := exec.CommandContext(ctx, srv.Command, srv.Args...)
+	// Windows 下隐藏上游 MCP 命令创建的控制台窗口；其他系统为空操作。
+	winproc.ConfigureNoWindow(cmd)
 	cmd.Env = append(os.Environ(), ExpandEnv(srv.Env)...)
 	client := mcp.NewClient(&mcp.Implementation{Name: "mcpx", Version: buildversion.Current}, options)
 	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)

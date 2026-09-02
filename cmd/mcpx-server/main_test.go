@@ -1,9 +1,12 @@
 package main
 
 import (
+	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime/debug"
 	"testing"
+	"time"
 
 	buildversion "mcpx/internal/version"
 )
@@ -88,6 +91,53 @@ func TestRunStopIsIdempotentWithoutDaemon(t *testing.T) {
 	}
 	if code := runStop(); code != 0 {
 		t.Fatalf("repeated runStop = %d, want 0", code)
+	}
+}
+
+// backgroundSleepHelperEnv 让测试二进制以"长活子进程"的身份重新执行自己。
+// 它提供了一个真实存活、但命令行与 daemon 可执行文件不匹配的 PID——正是
+// PID 被系统复用后的状态。
+const backgroundSleepHelperEnv = "MCPX_TEST_BACKGROUND_SLEEP_HELPER"
+
+func TestBackgroundSleepHelper(t *testing.T) {
+	if os.Getenv(backgroundSleepHelperEnv) != "1" {
+		t.Skip("helper process: 仅在被其他测试重新执行时运行")
+	}
+	time.Sleep(30 * time.Second)
+}
+
+// daemon 异常退出后状态文件会残留；等系统把那个 PID 复用给别的程序，
+// 旧实现会认定"pid 与 daemon 可执行文件不匹配"并直接报错返回，导致状态文件
+// 永远删不掉，之后每一次 `mcpx -d` 都失败。
+//
+// 正确行为：不匹配的 PID 按定义就不是我们的 daemon，应当丢弃这条陈旧记录
+// 并让启动继续，同时绝不对别人的进程发信号。
+func TestStopPreviousBackgroundDiscardsReusedPID(t *testing.T) {
+	helper := exec.Command(os.Args[0], "-test.run=TestBackgroundSleepHelper")
+	helper.Env = append(os.Environ(), backgroundSleepHelperEnv+"=1")
+	if err := helper.Start(); err != nil {
+		t.Fatalf("start helper process: %v", err)
+	}
+	defer func() {
+		_ = helper.Process.Kill()
+		_, _ = helper.Process.Wait()
+	}()
+
+	const unrelated = "/definitely/not/a/real/mcpx"
+	path := filepath.Join(t.TempDir(), daemonStateFilename)
+	if err := writeDaemonState(path, daemonState{PID: helper.Process.Pid, Executable: unrelated}); err != nil {
+		t.Fatal(err)
+	}
+
+	stoppedPIDs, err := stopPreviousBackground(path, unrelated)
+	if err != nil {
+		t.Fatalf("被复用的 pid 不能让启动失败: %v", err)
+	}
+	if len(stoppedPIDs) != 0 {
+		t.Fatalf("无关进程不应被报告为已停止: %v", stoppedPIDs)
+	}
+	if _, err := readDaemonState(path); err == nil {
+		t.Fatal("陈旧的 daemon 状态必须被删除，否则下次启动仍会失败")
 	}
 }
 
