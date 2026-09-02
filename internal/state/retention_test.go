@@ -73,6 +73,32 @@ func insertRetentionEvent(t *testing.T, db *sql.DB, workspace, remoteID, eventTy
 	return sequence
 }
 
+func insertRetentionTask(t *testing.T, db *sql.DB, id, remoteID, status, logPath string, startedAt int64, finishedAt *int64) {
+	t.Helper()
+	var finished any
+	if finishedAt != nil {
+		finished = *finishedAt
+	}
+	_, err := db.Exec(`INSERT INTO terminal_tasks
+        (id, remote_session_id, workspace_name, workspace_path, command, status, log_path, started_at, finished_at, updated_at)
+        VALUES (?, ?, 'demo', '/tmp', 'echo output', ?, ?, ?, ?, ?)`, id, remoteID, status, logPath, startedAt, finished, startedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeRetentionTaskLogs(t *testing.T, logDir, id string) []string {
+	t.Helper()
+	base := filepath.Join(logDir, id)
+	paths := []string{base + ".log", base + ".stdout.log", base + ".stderr.log"}
+	for _, path := range paths {
+		if err := os.WriteFile(path, []byte("output"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return paths
+}
+
 func TestObservationRetentionTreatsProgressAsMemory(t *testing.T) {
 	process, err := observationPredicate("process", "e")
 	if err != nil {
@@ -117,7 +143,7 @@ func TestObservationRetentionNewestWindowIsNotCorrelated(t *testing.T) {
 	}
 }
 
-func TestRetentionProtectsActiveSessionsAndReferencedSnapshots(t *testing.T) {
+func TestRetentionBoundsSessionEventsAndReferencedSnapshots(t *testing.T) {
 	db, service, now := newRetentionTestService(t, "")
 	insertRetentionPrincipal(t, db, "principal")
 	insertRetentionSession(t, db, "active", "demo", "active", "principal")
@@ -159,10 +185,10 @@ func TestRetentionProtectsActiveSessionsAndReferencedSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.DeletedObservationEvents != 3 {
-		t.Fatalf("deleted observation events=%d, want 3; report=%+v", report.DeletedObservationEvents, report)
+	if report.DeletedObservationEvents != 5 {
+		t.Fatalf("deleted observation events=%d, want 5; report=%+v", report.DeletedObservationEvents, report)
 	}
-	for _, sequence := range []int64{activeProcess, activeMemory, secondRecent} {
+	for _, sequence := range []int64{secondRecent} {
 		var count int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM observation_events WHERE sequence = ?`, sequence).Scan(&count); err != nil {
 			t.Fatal(err)
@@ -171,7 +197,7 @@ func TestRetentionProtectsActiveSessionsAndReferencedSnapshots(t *testing.T) {
 			t.Fatalf("protected/recent event %d was deleted", sequence)
 		}
 	}
-	for _, sequence := range []int64{processOld, closedMemory, firstRecent} {
+	for _, sequence := range []int64{processOld, activeProcess, closedMemory, activeMemory, firstRecent} {
 		var count int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM observation_events WHERE sequence = ?`, sequence).Scan(&count); err != nil {
 			t.Fatal(err)
@@ -208,6 +234,43 @@ func TestRetentionProtectsActiveSessionsAndReferencedSnapshots(t *testing.T) {
 	}
 	if fileCount != 1 {
 		t.Fatal("active file snapshot was deleted")
+	}
+}
+
+func TestRetentionDeletesExpiredEventsFromOpenSessionStatuses(t *testing.T) {
+	db, service, now := newRetentionTestService(t, "")
+	insertRetentionPrincipal(t, db, "principal")
+	service.policy.ProcessEventMaxRows = 100
+
+	old := now.Add(-2 * time.Hour).UnixMilli()
+	recent := now.Add(-10 * time.Minute).UnixMilli()
+	var oldSequences, recentSequences []int64
+	for _, status := range []string{"active", "idle", "blocked"} {
+		insertRetentionSession(t, db, status, "demo", status, "principal")
+		oldSequences = append(oldSequences, insertRetentionEvent(t, db, "demo", status, "tool.started", "file_read", old))
+		recentSequences = append(recentSequences, insertRetentionEvent(t, db, "demo", status, "tool.started", "file_read", recent))
+	}
+
+	if _, err := service.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, sequence := range oldSequences {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM observation_events WHERE sequence = ?`, sequence).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("expired event %d remains for an open session", sequence)
+		}
+	}
+	for _, sequence := range recentSequences {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM observation_events WHERE sequence = ?`, sequence).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("recent event %d was deleted", sequence)
+		}
 	}
 }
 
@@ -333,5 +396,95 @@ func TestRetentionTaskLogFailureKeepsRow(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatal("task row was deleted after log removal failed")
+	}
+}
+
+func TestRetentionDeletesFinishedTasksFromOpenSessions(t *testing.T) {
+	logDir := t.TempDir()
+	db, service, now := newRetentionTestService(t, logDir)
+	insertRetentionPrincipal(t, db, "principal")
+	old := now.Add(-2 * time.Hour).UnixMilli()
+
+	var removableIDs []string
+	for _, status := range []string{"active", "idle", "blocked"} {
+		insertRetentionSession(t, db, status, "demo", status, "principal")
+		id := status + "-task"
+		writeRetentionTaskLogs(t, logDir, status)
+		finished := old
+		insertRetentionTask(t, db, id, status, "exited", filepath.Join(logDir, status+".log"), old, &finished)
+		removableIDs = append(removableIDs, id)
+	}
+
+	insertRetentionSession(t, db, "running", "demo", "active", "principal")
+	runningPaths := writeRetentionTaskLogs(t, logDir, "running")
+	insertRetentionTask(t, db, "running-task", "running", "running", runningPaths[0], old, nil)
+
+	insertRetentionSession(t, db, "referenced", "demo", "active", "principal")
+	referencedPaths := writeRetentionTaskLogs(t, logDir, "referenced")
+	insertRetentionTask(t, db, "referenced-task", "referenced", "exited", referencedPaths[0], old, &old)
+	_, err := db.Exec(`INSERT INTO plans
+        (id, remote_session_id, goal, status, created_by, created_at, updated_at)
+        VALUES ('plan', 'referenced', 'retain evidence', 'ready', 'principal', ?, ?)`, old, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO plan_tasks
+        (id, plan_id, ordinal, title, status, created_at, updated_at)
+        VALUES ('plan-task', 'plan', 1, 'retain task', 'todo', ?, ?)`, old, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO plan_task_evidence
+        (id, plan_id, task_id, kind, reference_id, validated, created_by, created_at)
+        VALUES ('evidence', 'plan', 'plan-task', 'execute', 'referenced-task', 1, 'principal', ?)`, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := service.RunOnce(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.DeletedTerminalTasks != len(removableIDs) {
+		t.Fatalf("deleted terminal tasks=%d, want %d; report=%+v", report.DeletedTerminalTasks, len(removableIDs), report)
+	}
+	for _, id := range removableIDs {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM terminal_tasks WHERE id = ?`, id).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("finished task %q remains", id)
+		}
+	}
+	for _, id := range []string{"running-task", "referenced-task"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM terminal_tasks WHERE id = ?`, id).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("protected task %q was deleted", id)
+		}
+	}
+	for _, path := range runningPaths {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("running task log %q was removed: %v", path, err)
+		}
+	}
+	for _, path := range referencedPaths {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("referenced task log %q was removed: %v", path, err)
+		}
+	}
+	for _, status := range []string{"active", "idle", "blocked"} {
+		for _, path := range []string{
+			filepath.Join(logDir, status+".log"),
+			filepath.Join(logDir, status+".stdout.log"),
+			filepath.Join(logDir, status+".stderr.log"),
+		} {
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("removed task log %q still exists: %v", path, err)
+			}
+		}
 	}
 }

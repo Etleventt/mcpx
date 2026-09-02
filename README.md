@@ -272,7 +272,8 @@ limits:
 文件策略默认 `max_patch_files=20`、`max_patch_lines=2000`，而公开 `edit` 工具还有独立的
 1000 changed-lines 硬上限；工具结果预算为 256 KiB；Terminal、File Watch、Skill 和上游 MCP
 发现默认启用。状态保留任务默认每天运行一次，过程事件与终端 Task 默认保留 30 天，模型记忆事件
-保留 180 天，环境快照保留 90 天。
+保留 180 天，环境快照保留 90 天。单个执行 Task 的观测输出最多持久化 32 MiB，超出后观测事件
+会标记为截断；完整输出仍通过 Task 日志 Resource URI 读取。
 
 需要特别注意：当前首次生成的 `config.yaml` 使用 `security.commands.default: allow`，同时内置
 `git push` / `docker` / `npm install` 的 `confirm` 规则和 `rm -rf /` / `mkfs` / `shutdown` 的
@@ -328,8 +329,11 @@ security:
 ### 状态保留
 
 `state.retention` 负责定期回收过期的观测、Task 日志、快照和临时记录。
-活跃会话、未完成 Plan、未过期确认、有效幂等记录和仍被引用的快照
-会受到保护。保留策略只在全局 `config.yaml` 中生效。
+观测事件和已完成 Task 不再因为 Remote Session 处于 `active`、`idle` 或 `blocked`
+而永久跳过 TTL 和行数限制；运行中的 Task、被 `execute` Evidence 引用的 Task、未完成
+Plan、未过期确认、有效幂等记录和仍被引用的快照会受到保护。`command.output` 按执行 Task
+合并限制累计观测体量，超限后通过 Task 日志 Resource URI 恢复。保留策略只在全局
+`config.yaml` 中生效。
 
 ## 接入 MCP 客户端
 
@@ -809,8 +813,9 @@ ARC 内容仍先显示 `Read`、`Edited`、`Ran`、`Searched` 等语义动作，
 - SQLite、Task 日志、OAuth 客户端注册和 Token 密钥位于 `~/.mcpx/`，运行时使用
   受限文件权限；不要把真实 Token、密码或 Secret 写入仓库和命令字符串。
 - 截图默认通过 MCP 返回，不写入 Workspace 或 SQLite。
-- `state.retention` 会清理过期过程事件、Task、快照和临时记录，但保护活跃会话
-  和未完成交付状态。
+- `state.retention` 会清理过期过程事件、已完成 Task、快照和临时记录；运行中的 Task、
+  被 `execute` Evidence 引用的 Task 和未完成交付状态仍受保护。观测输出超过单任务上限时，
+  使用 Task 日志 Resource URI 读取被截断部分。
 
 ## 项目开发
 

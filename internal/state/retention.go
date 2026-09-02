@@ -230,11 +230,6 @@ WHERE e.workspace_name = ? AND %s
       ORDER BY newest.created_at DESC, newest.sequence DESC
       LIMIT ?
   ))
-  AND NOT EXISTS (
-      SELECT 1 FROM remote_sessions active
-      WHERE active.id = e.remote_session_id
-        AND active.status IN ('active', 'idle', 'blocked')
-  )
 ORDER BY e.created_at ASC, e.sequence ASC
 LIMIT ?`, predicate, newestPredicate), nil
 }
@@ -288,13 +283,11 @@ func (s *RetentionService) deleteExpiredEphemeral(ctx context.Context, now int64
 func (s *RetentionService) deleteTerminalTasks(ctx context.Context, cutoff time.Time) (int, []string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT t.id, t.log_path
 FROM terminal_tasks t
-LEFT JOIN remote_sessions rs ON rs.id = t.remote_session_id
 WHERE t.status <> 'running'
   AND COALESCE(t.finished_at, t.updated_at) < ?
-  AND (rs.id IS NULL OR rs.status IN ('closed', 'archived'))
   AND NOT EXISTS (
       SELECT 1 FROM plan_task_evidence e
-      WHERE e.kind = 'terminal_task' AND e.reference_id = t.id
+      WHERE e.kind = 'execute' AND e.reference_id = t.id
   )
 ORDER BY COALESCE(t.finished_at, t.updated_at), t.id
 LIMIT ?`, cutoff.UnixMilli(), retentionBatchSize)
@@ -339,6 +332,20 @@ func (s *RetentionService) removeTaskLog(path string) error {
 	if path == "" || s.logDir == "" {
 		return nil
 	}
+	paths := []string{path}
+	if strings.HasSuffix(path, ".log") && !strings.HasSuffix(path, ".stdout.log") && !strings.HasSuffix(path, ".stderr.log") {
+		base := strings.TrimSuffix(path, ".log")
+		paths = append(paths, base+".stdout.log", base+".stderr.log")
+	}
+	for _, candidate := range paths {
+		if err := s.removeTaskLogFile(candidate); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *RetentionService) removeTaskLogFile(path string) error {
 	root, err := filepath.Abs(s.logDir)
 	if err != nil {
 		return err
