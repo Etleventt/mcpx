@@ -394,6 +394,8 @@ var migrations = []string{
 		ON operations(state, expires_at, remote_session_id);`,
 	`ALTER TABLE observation_events ADD COLUMN step_id TEXT NOT NULL DEFAULT '';`,
 	`ALTER TABLE changesets ADD COLUMN discarded_at INTEGER;`,
+	`ALTER TABLE remote_sessions ADD COLUMN approval_mode TEXT NOT NULL DEFAULT 'standard'
+		CHECK (approval_mode IN ('standard','trusted'));`,
 }
 
 func applyMigrations(ctx context.Context, db *sql.DB) error {

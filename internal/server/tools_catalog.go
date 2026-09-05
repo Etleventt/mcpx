@@ -426,6 +426,7 @@ func (r *Runtime) registerConsolidatedToolsV2(s *mcp.Server) {
 	r.addTool(s, publicTool("session", toolDesc["session"], map[string]any{
 		"remote_session_id": remoteSession, "workspace": workspace, "action": enumSchema("生命周期动作", "open", "update", "handoff", "attach", "close"),
 		"label": stringSchema("会话标签"), "description": stringSchema("开发目标或新描述"), "client_request_id": stringSchema("客户端幂等键"),
+		"approval_mode":                enumSchema("确认模式；standard=按策略逐次确认，trusted=自动批准所有 MCPX confirmation；deny 与不安全 shell 结构仍会硬拒绝", "standard", "trusted"),
 		"include_instructions_content": booleanSchema("返回有界 AGENTS.md 内容"), "include_upstream_tools": booleanSchema("返回上游工具 schema"), "include_project_tasks": booleanSchema("返回项目任务"),
 		"known_revisions": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "客户端已知版本"},
 		"status":          stringSchema("新状态"), "expected_version": numberSchema("乐观锁版本"), "role": stringSchema("接力角色"), "expires_in": numberSchema("接力有效秒数"),
@@ -463,7 +464,8 @@ func (r *Runtime) registerConsolidatedToolsV2(s *mcp.Server) {
 	}, []string{"remote_session_id", "action", "purpose"}, mutatingToolAnnotation), r.toolChange)
 	r.addTool(s, publicTool("change_read", toolDesc["change_read"], map[string]any{
 		"remote_session_id": remoteSession, "view": enumSchema("读取视图", "diff", "history"), "changeset_id": stringSchema("Changeset ID"),
-		"limit": numberSchema("历史数量"), "known_history_digest": stringSchema("上一次 history 返回的 history_digest"),
+		"limit": numberSchema("history 数量；diff 分页字节预算，最高 64 KiB"), "offset": numberSchema("diff 字节偏移；传 offset 或 limit 启用完整差异分页"),
+		"known_history_digest": stringSchema("上一次 history 返回的 history_digest"),
 	}, []string{"remote_session_id", "view"}, readOnlyToolAnnotation), r.toolChangeRead)
 
 	r.addTool(s, publicTool("command_run", toolDesc["command_run"], map[string]any{

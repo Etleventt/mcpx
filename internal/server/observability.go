@@ -188,6 +188,9 @@ func logToolCall(name string, runtime RuntimeContext, status string, timing inte
 		"completed_at_ms", timing.CompletedAtMs, "network_latency_ms", timing.NetworkLatencyMs,
 		"processing_ms", timing.ProcessingMs, "server_elapsed_ms", timing.ServerElapsedMs,
 	}
+	if runtime.RelayRequestID != "" {
+		fields = append(fields, "relay_request_id", runtime.RelayRequestID)
+	}
 	if runtime.ClientName != "" {
 		fields = append(fields, "client_name", runtime.ClientName, "client_version", runtime.ClientVersion)
 	}
@@ -240,6 +243,9 @@ func (g *Gateway) accessLog(next http.Handler) http.Handler {
 		w.Header().Set("X-Request-ID", runtime.RequestID)
 		w.Header().Set("X-MCPX-Trace-ID", runtime.TraceID)
 		w.Header().Set("X-MCPX-Span-ID", runtime.SpanID)
+		if runtime.RelayRequestID != "" {
+			w.Header().Set(relayRequestIDHeader, runtime.RelayRequestID)
+		}
 		w.Header().Add("Trailer", "Server-Timing")
 		w.Header().Add("Trailer", "X-MCPX-Processing-Ms")
 		logged := &accessLogResponseWriter{ResponseWriter: w}
@@ -256,6 +262,7 @@ func (g *Gateway) accessLog(next http.Handler) http.Handler {
 			"path", r.URL.Path,
 			"status", status,
 			"request_id", runtime.RequestID,
+			"relay_request_id", runtime.RelayRequestID,
 			"trace_id", runtime.TraceID,
 			"span_id", runtime.SpanID,
 			"duration_ms", processingMs,

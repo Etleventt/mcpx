@@ -65,6 +65,11 @@ func (r *Runtime) toolSessionOpen(ctx context.Context, req *mcp.CallToolRequest)
 
 	wsPath := session.WorkspacePath
 	effective := r.effectiveConfig(wsPath)
+	if includeUpstreamTools && effective.Discovery.MCP.Enabled {
+		if confirmation, err := r.requireProjectMCPTrust(ctx, envReq, principal, session.ID, session.WorkspaceName, wsPath); confirmation != nil || err != nil {
+			return confirmation, err
+		}
+	}
 	tools := r.runtimeToolCapabilities(effective, &session, false)
 
 	var (
@@ -159,7 +164,7 @@ func (r *Runtime) toolSessionOpen(ctx context.Context, req *mcp.CallToolRequest)
 			"version": build.Version, "commit": build.Commit, "build_time": build.Date,
 		},
 		"remote_session": map[string]any{
-			"id": session.ID, "role": session.Role, "status": session.Status,
+			"id": session.ID, "role": session.Role, "status": session.Status, "approval_mode": session.ApprovalMode,
 			"version": session.Version, "label": session.Label, "description": session.Description,
 			"workspace_name": session.WorkspaceName, "workspace_path": session.WorkspacePath,
 		},

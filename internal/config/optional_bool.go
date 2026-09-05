@@ -31,6 +31,12 @@ func (c *FileWatchConfig) UnmarshalYAML(node *yaml.Node) error {
 }
 
 func (c *MCPDiscovery) UnmarshalYAML(node *yaml.Node) error {
+	type plain MCPDiscovery
+	var value plain
+	if err := node.Decode(&value); err != nil {
+		return err
+	}
+	*c = MCPDiscovery(value)
 	var err error
 	c.Enabled, c.EnabledSet, err = decodeEnabled(node)
 	return err

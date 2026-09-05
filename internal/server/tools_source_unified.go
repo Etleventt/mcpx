@@ -401,23 +401,16 @@ func (r *Runtime) toolContextQueryAction(ctx context.Context, req *mcp.CallToolR
 		parallel = boolPayload(envReq.Payload, "parallel")
 	}
 	maxResults := intPayload(envReq.Payload, "max_results")
-	var seeds []string
-	if raw, ok := envReq.Payload["paths"].([]any); ok {
-		for _, value := range raw {
-			if path, ok := value.(string); ok && path != "" {
-				seeds = append(seeds, path)
-			}
-		}
-	}
+	seeds := stringSlicePayload(envReq.Payload, "paths")
 	include, _ := envReq.Payload["include_glob"].(string)
 	exclude, _ := envReq.Payload["exclude_glob"].(string)
-	allowed := r.sourcePathAllowedWithGlobs(session.WorkspacePath, include, exclude)
+	allowed := r.sourcePathAllowed(session.WorkspacePath)
 	maxBytes := r.effectiveConfig(session.WorkspacePath).Security.Files.MaxReadBytes
 	if requested := intPayload(envReq.Payload, "max_bytes_per_file"); requested > 0 && int64(requested) < maxBytes {
 		maxBytes = int64(requested)
 	}
 	data, err := source.SmartQueryPage(session.WorkspacePath, source.SmartQueryOptions{
-		Query: query, Mode: mode, Parallel: parallel, MaxResults: maxResults,
+		Query: query, Mode: mode, Parallel: parallel, MaxResults: maxResults, Paths: seeds,
 		Cursor: sourcePayloadString(envReq.Payload, "cursor"), Pattern: include, ExcludePattern: exclude,
 		ContextBefore: intPayload(envReq.Payload, "context_before"), ContextAfter: intPayload(envReq.Payload, "context_after"),
 		MaxBytesPerFile: maxBytes, IncludeSHA256: boolPayload(envReq.Payload, "include_sha256"), Allowed: allowed,
@@ -459,6 +452,7 @@ func (r *Runtime) toolContextSearchAction(ctx context.Context, req *mcp.CallTool
 		caseSensitive = true // retain existing source search behaviour by default.
 	}
 	resultData, err := source.SearchWith(session.WorkspacePath, source.SearchOptions{
+		Paths: stringSlicePayload(envReq.Payload, "paths"),
 		Query: query, Pattern: pattern, ExcludePattern: sourcePayloadString(envReq.Payload, "exclude_glob"), Cursor: sourcePayloadString(envReq.Payload, "cursor"), Regex: regex,
 		CaseSensitive: caseSensitive, Limit: intPayload(envReq.Payload, "limit"), ContextBefore: intPayload(envReq.Payload, "context_before"), ContextAfter: intPayload(envReq.Payload, "context_after"), IncludeSHA256: boolPayload(envReq.Payload, "include_sha256"),
 	}, r.sourcePathAllowed(session.WorkspacePath))
@@ -470,6 +464,7 @@ func (r *Runtime) toolContextSearchAction(ctx context.Context, req *mcp.CallTool
 		data["next_cursor"] = resultData.NextCursor
 		data["next_action"] = nextAction("context_query", map[string]any{
 			"remote_session_id": session.ID, "action": "search", "query": query,
+			"paths":  stringSlicePayload(envReq.Payload, "paths"),
 			"cursor": resultData.NextCursor, "limit": intPayload(envReq.Payload, "limit"),
 			"include_glob": pattern, "exclude_glob": sourcePayloadString(envReq.Payload, "exclude_glob"),
 			"regex": regex, "case_sensitive": caseSensitive,
@@ -487,7 +482,7 @@ func (r *Runtime) toolContextListAction(ctx context.Context, req *mcp.CallToolRe
 		return fail, nil
 	}
 	pattern := sourcePayloadString(envReq.Payload, "include_glob")
-	list, err := source.ListWith(session.WorkspacePath, pattern, sourcePayloadString(envReq.Payload, "exclude_glob"), sourcePayloadString(envReq.Payload, "cursor"), intPayload(envReq.Payload, "limit"), boolPayload(envReq.Payload, "include_sha256"), r.sourcePathAllowed(session.WorkspacePath))
+	list, err := source.ListScoped(session.WorkspacePath, pattern, sourcePayloadString(envReq.Payload, "exclude_glob"), stringSlicePayload(envReq.Payload, "paths"), sourcePayloadString(envReq.Payload, "cursor"), intPayload(envReq.Payload, "limit"), boolPayload(envReq.Payload, "include_sha256"), r.sourcePathAllowed(session.WorkspacePath))
 	if err != nil {
 		return r.sourceError(envReq, session.ID, session.WorkspaceName, err)
 	}
@@ -496,6 +491,7 @@ func (r *Runtime) toolContextListAction(ctx context.Context, req *mcp.CallToolRe
 		data["next_cursor"] = list.NextCursor
 		data["next_action"] = nextAction("context_query", map[string]any{
 			"remote_session_id": session.ID, "action": "list", "include_glob": pattern,
+			"paths":        stringSlicePayload(envReq.Payload, "paths"),
 			"exclude_glob": sourcePayloadString(envReq.Payload, "exclude_glob"), "cursor": list.NextCursor,
 			"limit": intPayload(envReq.Payload, "limit"), "include_sha256": boolPayload(envReq.Payload, "include_sha256"),
 		})

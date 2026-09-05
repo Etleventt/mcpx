@@ -144,7 +144,7 @@ func (r *Runtime) toolChangeExecute(ctx context.Context, req *mcp.CallToolReques
 		return out, nil
 	}
 
-	needsConfirmation, changedLines, deniedPath := evaluateChangesetPolicy(effective, prepared.Files)
+	needsConfirmation, changedLines, deniedPath := evaluateChangesetPolicy(effective, prepared.Files, session.ApprovalMode == remotesession.ApprovalModeTrusted)
 	if deniedPath != "" {
 		response := envelope.Fail(envelope.StatusDenied, envReq.RequestID, session.WorkspaceName, map[string]any{"path": deniedPath}, "FILE_DENIED", "file denied by policy")
 		response.RemoteSessionID = session.ID
@@ -277,7 +277,7 @@ func (r *Runtime) executeRevertChange(ctx context.Context, envReq envelope.Reque
 	// revert draft is intentionally recreated on retry, so binding the semantic
 	// confirmation to the generated draft would make the returned token unusable.
 	effective := r.effectiveConfig(session.WorkspacePath)
-	needsConfirmation, changedLines, deniedPath := evaluateChangesetPolicy(effective, revert.Files)
+	needsConfirmation, changedLines, deniedPath := evaluateChangesetPolicy(effective, revert.Files, session.ApprovalMode == remotesession.ApprovalModeTrusted)
 	if deniedPath != "" {
 		response := envelope.Fail(envelope.StatusDenied, envReq.RequestID, session.WorkspaceName, map[string]any{"path": deniedPath}, "FILE_DENIED", "file denied by policy")
 		response.RemoteSessionID = session.ID
@@ -317,7 +317,7 @@ func (r *Runtime) executeRevertChange(ctx context.Context, envReq envelope.Reque
 
 func (r *Runtime) applyPreparedChange(ctx context.Context, envReq envelope.Request, principal auth.Principal, session remotesession.Session, item changeset.Changeset, confirmationToken string) (*mcp.CallToolResult, error) {
 	effective := r.effectiveConfig(session.WorkspacePath)
-	needsConfirmation, changedLines, deniedPath := evaluateChangesetPolicy(effective, item.Files)
+	needsConfirmation, changedLines, deniedPath := evaluateChangesetPolicy(effective, item.Files, session.ApprovalMode == remotesession.ApprovalModeTrusted)
 	if deniedPath != "" {
 		response := envelope.Fail(envelope.StatusDenied, envReq.RequestID, session.WorkspaceName, map[string]any{"path": deniedPath}, "FILE_DENIED", "file denied by policy")
 		response.RemoteSessionID = session.ID
@@ -434,7 +434,7 @@ func (r *Runtime) resolveChangeInstructions(workspacePath string, operations []c
 	return resolution, nil
 }
 
-func evaluateChangesetPolicy(effective config.Config, files []changeset.FileChange) (needsConfirmation bool, changedLines int, deniedPath string) {
+func evaluateChangesetPolicy(effective config.Config, files []changeset.FileChange, trusted bool) (needsConfirmation bool, changedLines int, deniedPath string) {
 	for _, file := range files {
 		changedLines += changedLineCount(file.Original, file.Proposed)
 		if changeset.IsDirectoryChange(file) {
@@ -444,13 +444,13 @@ func evaluateChangesetPolicy(effective config.Config, files []changeset.FileChan
 			if path == "" {
 				continue
 			}
-			switch security.MatchFile(effective.Security.Files, path) {
+			switch security.MatchFileWithTrust(effective.Security.Files, path, trusted) {
 			case security.Deny:
 				return false, changedLines, path
 			case security.Confirm:
 				needsConfirmation = true
 			}
-			if file.Operation == "delete" {
+			if file.Operation == "delete" && !trusted {
 				needsConfirmation = true
 			}
 		}

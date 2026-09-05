@@ -56,7 +56,7 @@ func (r *Runtime) toolCommandExecute(ctx context.Context, req *mcp.CallToolReque
 	if !effective.Terminal.Enabled {
 		return r.terminalError(envReq, remote.ID, remote.WorkspaceName, "disabled", "terminal tools are disabled")
 	}
-	decision := security.MatchCommand(effective.Security.Commands, command)
+	decision := security.MatchCommandWithTrust(effective.Security.Commands, command, remote.ApprovalMode == remotesession.ApprovalModeTrusted)
 	switch decision {
 	case security.Deny:
 		r.logAudit(audit.Event{RequestID: envReq.RequestID, RemoteSessionID: remote.ID, Workspace: remote.WorkspaceName, Tool: "command_execute", Command: command, Status: "denied", Detail: commandExecutionDetail(purpose, scope, commandDigest)})

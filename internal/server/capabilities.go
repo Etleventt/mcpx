@@ -129,7 +129,7 @@ func sessionCapabilityRevision(session *remotesession.Session) string {
 	if session == nil {
 		return "sha256:none"
 	}
-	return hashRevision(map[string]any{"id": session.ID, "role": session.Role, "status": session.Status})
+	return hashRevision(map[string]any{"id": session.ID, "role": session.Role, "status": session.Status, "approval_mode": session.ApprovalMode})
 }
 
 // capabilityManifestRevision is independent of a single session role snapshot.

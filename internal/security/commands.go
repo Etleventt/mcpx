@@ -51,12 +51,18 @@ func ParseDefault(s string) Decision {
 // segments; pipes, redirections, background operators, and command substitution
 // are structurally rejected because they cannot be split safely.
 func MatchCommand(rules config.CommandRules, command string) Decision {
+	return MatchCommandWithTrust(rules, command, false)
+}
+
+// MatchCommandWithTrust keeps deny rules authoritative while trusted sessions
+// automatically approve every confirmation decision.
+func MatchCommandWithTrust(rules config.CommandRules, command string, trusted bool) Decision {
 	if containsUnsafeOperator(command) {
 		return Deny
 	}
 	needsConfirmation := false
 	for _, segment := range splitSegments(command) {
-		switch matchSegment(rules, segment) {
+		switch matchSegment(rules, segment, trusted) {
 		case Deny:
 			return Deny
 		case Confirm:
@@ -70,11 +76,14 @@ func MatchCommand(rules config.CommandRules, command string) Decision {
 }
 
 // matchSegment evaluates a single command segment without control operators.
-func matchSegment(rules config.CommandRules, segment string) Decision {
+func matchSegment(rules config.CommandRules, segment string, trusted bool) Decision {
 	if matchAny(rules.Deny, segment) {
 		return Deny
 	}
 	if matchAny(rules.Confirm, segment) {
+		if trusted {
+			return Allow
+		}
 		return Confirm
 	}
 	if matchAny(rules.Allow, segment) {
@@ -84,6 +93,9 @@ func matchSegment(rules config.CommandRules, segment string) Decision {
 		return Allow
 	}
 	decision := ParseDefault(rules.Default)
+	if trusted && decision == Confirm {
+		return Allow
+	}
 	return decision
 }
 
@@ -220,16 +232,28 @@ func matchAny(patterns []string, command string) bool {
 // MatchFile applies file path policy. Once any list is configured, unmatched
 // paths require confirmation, making an allow list behave as a real whitelist.
 func MatchFile(rules config.FileRules, path string) Decision {
+	return MatchFileWithTrust(rules, path, false)
+}
+
+// MatchFileWithTrust keeps deny rules authoritative while trusted sessions
+// automatically approve both explicit and fallback file confirmations.
+func MatchFileWithTrust(rules config.FileRules, path string, trusted bool) Decision {
 	if matchAny(rules.Deny, path) {
 		return Deny
 	}
 	if matchAny(rules.Confirm, path) {
+		if trusted {
+			return Allow
+		}
 		return Confirm
 	}
 	if matchAny(rules.Allow, path) {
 		return Allow
 	}
 	if len(rules.Allow)+len(rules.Confirm)+len(rules.Deny) > 0 {
+		if trusted {
+			return Allow
+		}
 		return Confirm
 	}
 	return Allow

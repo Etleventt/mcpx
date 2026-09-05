@@ -215,6 +215,9 @@ func (r *Runtime) toolMCPList(ctx context.Context, req *mcp.CallToolRequest) (*m
 	serverName, _ := envReq.Payload["server"].(string)
 	serverName = strings.TrimSpace(serverName)
 	if includeTools {
+		if confirmation, confirmationErr := r.requireProjectMCPTrust(ctx, envReq, principal, remoteID, ws.Name, ws.Path); confirmation != nil || confirmationErr != nil {
+			return confirmation, confirmationErr
+		}
 		if serverName != "" {
 			srv, ok := manager.ServerConfig(serverName)
 			if !ok {
@@ -237,13 +240,16 @@ func (r *Runtime) toolMCPList(ctx context.Context, req *mcp.CallToolRequest) (*m
 }
 
 func (r *Runtime) toolMCPCall(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	envReq, _, remote, fail := r.changeRequest(ctx, req, true)
+	envReq, principal, remote, fail := r.changeRequest(ctx, req, true)
 	if fail != nil {
 		return fail, nil
 	}
 	eff := r.effectiveConfig(remote.WorkspacePath)
 	if !eff.Discovery.MCP.Enabled {
 		return r.terminalError(envReq, remote.ID, remote.WorkspaceName, "disabled", "MCP discovery is disabled")
+	}
+	if confirmation, confirmationErr := r.requireProjectMCPTrust(ctx, envReq, principal, remote.ID, remote.WorkspaceName, remote.WorkspacePath); confirmation != nil || confirmationErr != nil {
+		return confirmation, confirmationErr
 	}
 	serverName, _ := envReq.Payload["server"].(string)
 	toolName, _ := envReq.Payload["tool"].(string)

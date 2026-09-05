@@ -33,17 +33,32 @@ type observationTaskStreamKey struct {
 	stream          string
 }
 
+type observationTaskOutputKey struct {
+	taskID          string
+	remoteSessionID string
+}
+
+type observationTaskOutputState struct {
+	usedBytes    int64
+	truncated    bool
+	finalStreams map[string]struct{}
+}
+
+const observationTaskOutputMarker = "[output truncated; read task logs for remaining output]"
+
 // observationBridge is the single write boundary for the workspace observer.
 // Store.Append always happens before Broker.Publish so a live observer can
 // recover every event from SQLite after a disconnect or buffer overflow.
 // Tool start/complete events are enqueued on async so tools/call is not blocked.
 type observationBridge struct {
-	store           *observation.Store
-	broker          *observation.Broker
-	async           *observation.AsyncRecorder
-	resolve         func(context.Context, envelope.Request) (string, string)
-	outputStateMu   sync.Mutex
-	outputSanitizer map[observationTaskStreamKey]*observation.TextStreamSanitizer
+	store              *observation.Store
+	broker             *observation.Broker
+	async              *observation.AsyncRecorder
+	resolve            func(context.Context, envelope.Request) (string, string)
+	outputStateMu      sync.Mutex
+	outputSanitizer    map[observationTaskStreamKey]*observation.TextStreamSanitizer
+	outputBudget       map[observationTaskOutputKey]*observationTaskOutputState
+	maxTaskOutputBytes int64
 }
 
 func (b *observationBridge) Record(ctx context.Context, event observation.Event) error {
@@ -404,19 +419,12 @@ func (r *Runtime) observeTaskOutput(chunk terminal.OutputChunk) {
 	if r == nil || r.observation == nil || (len(chunk.Data) == 0 && !chunk.Final) {
 		return
 	}
-	text, truncated := r.observation.sanitizeTaskOutput(chunk)
-	if text == "" && len(chunk.Data) == 0 {
+	text, sanitizedTruncated := r.observation.sanitizeTaskOutput(chunk)
+	encoded, budgetTruncated, keep := r.observation.prepareTaskOutput(chunk, text)
+	if !keep {
 		return
 	}
-	encoded, err := json.Marshal(map[string]any{
-		"text":  text,
-		"bytes": len(chunk.Data),
-	})
-	if err != nil {
-		encoded = []byte(`{"text":"[UNAVAILABLE]","bytes":0}`)
-		truncated = true
-	}
-	_ = r.observation.Record(context.Background(), observation.Event{
+	_ = r.observation.enqueueOrRecord(context.Background(), observation.Event{
 		Workspace:        chunk.WorkspaceName,
 		RemoteSessionID:  chunk.RemoteSessionID,
 		RequestID:        chunk.RequestID,
@@ -431,7 +439,7 @@ func (r *Runtime) observeTaskOutput(chunk terminal.OutputChunk) {
 		ResourceURI:      fmt.Sprintf("mcpx://remote-sessions/%s/tasks/%s/logs", chunk.RemoteSessionID, chunk.TaskID),
 		Stream:           chunk.Stream,
 		Offset:           chunk.Offset,
-		Truncated:        truncated,
+		Truncated:        sanitizedTruncated || budgetTruncated,
 	})
 }
 
@@ -456,6 +464,98 @@ func (b *observationBridge) sanitizeTaskOutput(chunk terminal.OutputChunk) (stri
 		delete(b.outputSanitizer, key)
 	}
 	return text, truncated
+}
+
+func (b *observationBridge) taskOutputLimit() int64 {
+	if b != nil && b.maxTaskOutputBytes > 0 {
+		return b.maxTaskOutputBytes
+	}
+	return terminal.MaxPersistedTaskLogBytes
+}
+
+func (b *observationBridge) prepareTaskOutput(chunk terminal.OutputChunk, text string) ([]byte, bool, bool) {
+	if b == nil {
+		return nil, false, false
+	}
+	key := observationTaskOutputKey{taskID: chunk.TaskID, remoteSessionID: chunk.RemoteSessionID}
+	b.outputStateMu.Lock()
+	defer b.outputStateMu.Unlock()
+	if b.outputBudget == nil {
+		b.outputBudget = make(map[observationTaskOutputKey]*observationTaskOutputState)
+	}
+	state := b.outputBudget[key]
+	if state == nil {
+		state = &observationTaskOutputState{finalStreams: make(map[string]struct{})}
+		b.outputBudget[key] = state
+	}
+	if chunk.Final {
+		state.finalStreams[chunk.Stream] = struct{}{}
+	}
+	cleanup := func() {
+		_, stdoutDone := state.finalStreams["stdout"]
+		_, stderrDone := state.finalStreams["stderr"]
+		if stdoutDone && stderrDone {
+			delete(b.outputBudget, key)
+		}
+	}
+	if state.truncated {
+		cleanup()
+		return nil, false, false
+	}
+	if len(chunk.Data) == 0 && text == "" {
+		cleanup()
+		return nil, false, false
+	}
+	remaining := b.taskOutputLimit() - state.usedBytes
+	if remaining <= 0 {
+		state.truncated = true
+		cleanup()
+		return nil, true, false
+	}
+	encoded := marshalTaskOutput(text, len(chunk.Data))
+	if int64(len(encoded)) <= remaining {
+		state.usedBytes += int64(len(encoded))
+		cleanup()
+		return encoded, false, true
+	}
+	encoded = fitTaskOutputPayload(text, len(chunk.Data), remaining)
+	state.truncated = true
+	if len(encoded) == 0 {
+		cleanup()
+		return nil, true, false
+	}
+	state.usedBytes += int64(len(encoded))
+	cleanup()
+	return encoded, true, true
+}
+
+func marshalTaskOutput(text string, byteCount int) []byte {
+	encoded, _ := json.Marshal(map[string]any{"text": text, "bytes": byteCount})
+	return encoded
+}
+
+func fitTaskOutputPayload(text string, byteCount int, budget int64) []byte {
+	if budget <= 0 {
+		return nil
+	}
+	marker := marshalTaskOutput(observationTaskOutputMarker, byteCount)
+	if int64(len(marker)) > budget {
+		return nil
+	}
+	runes := []rune(text)
+	low, high := 0, len(runes)
+	best := marker
+	for low <= high {
+		mid := low + (high-low)/2
+		candidate := marshalTaskOutput(string(runes[:mid])+observationTaskOutputMarker, byteCount)
+		if int64(len(candidate)) <= budget {
+			best = candidate
+			low = mid + 1
+		} else {
+			high = mid - 1
+		}
+	}
+	return best
 }
 
 func marshalObservationValue(value any) ([]byte, bool) {

@@ -423,7 +423,7 @@ func actionsFrom(data map[string]any) []Action {
 	actionType := "continue"
 	confirm := false
 	label := "Continue with " + tool
-	if strings.Contains(tool, "change") {
+	if strings.Contains(tool, "change") && tool != "change_read" && tool != "change_diff" && tool != "change_history" {
 		actionType, confirm, label = "mutation", true, "Continue with "+tool
 	}
 	return []Action{{ID: tool, Type: actionType, Label: label, Confirm: confirm, Arguments: args}}

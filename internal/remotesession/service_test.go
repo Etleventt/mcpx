@@ -52,6 +52,9 @@ func TestCreateListGetAndIdempotency(t *testing.T) {
 	if first.ResumeToken == "" || second.ResumeToken != "" || !second.ResumeTokenAlreadyIssued {
 		t.Fatalf("one-time token contract violated: first=%+v second=%+v", first, second)
 	}
+	if first.Session.ApprovalMode != ApprovalModeStandard {
+		t.Fatalf("default approval mode=%q want %q", first.Session.ApprovalMode, ApprovalModeStandard)
+	}
 	var cached string
 	if err := service.db.QueryRow(`SELECT response_json FROM idempotency_records
 		WHERE principal_id = ? AND client_request_id = ?`, owner.ID, in.ClientRequestID).Scan(&cached); err != nil {
@@ -111,15 +114,50 @@ func TestUpdateUsesOptimisticVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, err := service.Update(context.Background(), owner, created.Session.ID, "after", "", "idle", created.Session.Version)
+	updated, err := service.Update(context.Background(), owner, created.Session.ID, "after", "", "idle", "", created.Session.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if updated.Label != "after" || updated.Status != "idle" || updated.Version != 2 {
 		t.Fatalf("updated: %+v", updated)
 	}
-	if _, err := service.Update(context.Background(), owner, created.Session.ID, "stale", "", "", 1); !errors.Is(err, ErrConflict) {
+	if _, err := service.Update(context.Background(), owner, created.Session.ID, "stale", "", "", "", 1); !errors.Is(err, ErrConflict) {
 		t.Fatalf("want conflict, got %v", err)
+	}
+}
+
+func TestApprovalModeIsOwnerControlled(t *testing.T) {
+	service, _ := testService(t)
+	owner := testPrincipal("owner")
+	editor := testPrincipal("editor")
+	created, err := service.Create(context.Background(), owner, CreateInput{WorkspaceName: "mcpx", WorkspacePath: t.TempDir(), Label: "trusted"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := service.Update(context.Background(), owner, created.Session.ID, "", "", "", ApprovalModeTrusted, created.Session.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ApprovalMode != ApprovalModeTrusted {
+		t.Fatalf("approval mode=%q want %q", updated.ApprovalMode, ApprovalModeTrusted)
+	}
+	handoff, err := service.Handoff(context.Background(), owner, created.Session.ID, "editor", "edit", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attached, err := service.Attach(context.Background(), editor, handoff.HandoffToken, "client-editor", "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Update(context.Background(), editor, created.Session.ID, "", "", "", ApprovalModeStandard, attached.Version); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("editor approval mode change error=%v want forbidden", err)
+	}
+	got, err := service.Get(context.Background(), owner, created.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ApprovalMode != ApprovalModeTrusted {
+		t.Fatalf("stored approval mode=%q want %q", got.ApprovalMode, ApprovalModeTrusted)
 	}
 }
 

@@ -139,6 +139,7 @@ func TestProjectTaskAndArtifactRemoteSessionFlow(t *testing.T) {
 
 func TestCommandExecuteInlinesSmallOutputWithoutLogLink(t *testing.T) {
 	rt := newWorkspaceRuntime(t, "demo")
+	rt.cfg.Security.Commands.Allow = append(rt.cfg.Security.Commands.Allow, `^printf\b`)
 	principal, err := rt.principalFromContext(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -183,6 +184,7 @@ func TestCommandExecuteInlinesSmallOutputWithoutLogLink(t *testing.T) {
 
 func TestCommandExecuteTruncatedOutputStaysInline(t *testing.T) {
 	rt := newWorkspaceRuntime(t, "demo")
+	rt.cfg.Security.Commands.Allow = append(rt.cfg.Security.Commands.Allow, `^printf\b`)
 	rt.cfg.Limits.MaxResultBytes = 64
 	principal, err := rt.principalFromContext(context.Background())
 	if err != nil {

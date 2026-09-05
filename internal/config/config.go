@@ -139,8 +139,9 @@ type DiscoveryConfig struct {
 }
 
 type MCPDiscovery struct {
-	Enabled    bool `yaml:"enabled"`
-	EnabledSet bool `yaml:"-"`
+	Enabled       bool   `yaml:"enabled"`
+	EnabledSet    bool   `yaml:"-"`
+	ProjectConfig string `yaml:"project_config"`
 }
 
 type SkillsDiscovery struct {
@@ -199,7 +200,7 @@ func DefaultConfig() Config {
 		}},
 		Security: SecurityConfig{
 			Commands: CommandRules{
-				Default: "allow",
+				Default: "confirm",
 				Allow: []string{
 					`^ls\b`,
 					`^pwd$`,
@@ -229,7 +230,7 @@ func DefaultConfig() Config {
 		Terminal:   TerminalConfig{Enabled: true},
 		FileWatch:  FileWatchConfig{Enabled: true},
 		Discovery: DiscoveryConfig{
-			MCP: MCPDiscovery{Enabled: true},
+			MCP: MCPDiscovery{Enabled: true, ProjectConfig: "confirm"},
 			Skills: SkillsDiscovery{
 				Enabled: true,
 				Dirs: []string{

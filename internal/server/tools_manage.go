@@ -154,6 +154,9 @@ func (r *Runtime) toolExtensionManage(ctx context.Context, req *mcp.CallToolRequ
 			servers := manager.List()
 			servers = filterExtensionItemsByQuery(servers, query)
 			if include, _ := mcpresult.Arguments(req)["include_tools"].(bool); include && effective.Discovery.MCP.Enabled {
+				if confirmation, confirmationErr := r.requireProjectMCPTrust(ctx, envReq, principal, remoteID, workspace.Name, workspace.Path); confirmation != nil || confirmationErr != nil {
+					return confirmation, confirmationErr
+				}
 				servers = r.enrichServersWithTools(ctx, manager, servers)
 			}
 			data["upstream_mcp"] = servers

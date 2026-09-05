@@ -91,6 +91,7 @@ type Runtime struct {
 	changeExecuteMu       sync.Mutex
 	projectConfigMu       sync.RWMutex
 	projectConfigs        map[string]projectConfigCacheEntry
+	projectMCPTrust       projectMCPTrustStore
 	build                 BuildInfo
 }
 
@@ -303,21 +304,13 @@ func firstNonEmpty(values ...string) string {
 }
 
 func logStartupCredentials(cfg config.Config, oauthEnabled bool, version string) {
-	fields := []any{
+	logging.With("component", "auth").Info("startup credentials",
 		"version", firstNonEmpty(version, buildversion.Current),
 		"mode", config.EffectiveAuthMode(cfg.Auth),
 		"token_configured", strings.TrimSpace(cfg.Auth.Token) != "",
 		"oauth_password_configured", oauthEnabled && strings.TrimSpace(cfg.Auth.OAuth.Password) != "",
-	}
-	if token := strings.TrimSpace(cfg.Auth.Token); token != "" {
-		fields = append(fields, "token", token)
-	}
-	if oauthEnabled {
-		if password := strings.TrimSpace(cfg.Auth.OAuth.Password); password != "" {
-			fields = append(fields, "oauth_password", password)
-		}
-	}
-	logging.With("component", "auth").Info("startup credentials", fields...)
+		"oauth_enabled", oauthEnabled,
+	)
 }
 
 func buildOAuthServer(cfg *config.Config) (*oauth.Server, error) {

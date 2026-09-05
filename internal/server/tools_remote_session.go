@@ -138,12 +138,13 @@ func (r *Runtime) createRemoteSession(ctx context.Context, principal auth.Princi
 	}
 	label, _ := envReq.Payload["label"].(string)
 	description, _ := envReq.Payload["description"].(string)
+	approvalMode, _ := envReq.Payload["approval_mode"].(string)
 	clientRequestID, _ := envReq.Payload["client_request_id"].(string)
 	clientName, clientVersion := clientInfoFromContext(ctx)
 	gitHead, treeDigest := workspaceRevision(ctx, ws.Path)
 	result, err := r.remote.Create(ctx, principal, remotesession.CreateInput{
 		WorkspaceName: workspaceName, WorkspacePath: ws.Path, Label: label,
-		Description: description, BaseGitHead: gitHead, BaseTreeDigest: treeDigest,
+		Description: description, ApprovalMode: approvalMode, BaseGitHead: gitHead, BaseTreeDigest: treeDigest,
 		ClientRequestID: clientRequestID, ClientName: clientName, ClientVersion: clientVersion,
 	})
 	if err != nil {
@@ -254,7 +255,8 @@ func (r *Runtime) toolRemoteSessionUpdate(ctx context.Context, req *mcp.CallTool
 	label, _ := envReq.Payload["label"].(string)
 	description, _ := envReq.Payload["description"].(string)
 	status, _ := envReq.Payload["status"].(string)
-	session, err := r.remote.Update(ctx, principal, remoteSessionID, label, description, status, intPayload(envReq.Payload, "expected_version"))
+	approvalMode, _ := envReq.Payload["approval_mode"].(string)
+	session, err := r.remote.Update(ctx, principal, remoteSessionID, label, description, status, approvalMode, intPayload(envReq.Payload, "expected_version"))
 	if err != nil {
 		return r.remoteError(envReq, remoteSessionID, "", err)
 	}

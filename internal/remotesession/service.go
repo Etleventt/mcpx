@@ -20,6 +20,11 @@ import (
 	"mcpx/internal/auth"
 )
 
+const (
+	ApprovalModeStandard = "standard"
+	ApprovalModeTrusted  = "trusted"
+)
+
 var (
 	ErrNotFound     = errors.New("remote session not found")
 	ErrForbidden    = errors.New("remote session access denied")
@@ -67,6 +72,7 @@ type Session struct {
 	Label                 string     `json:"label"`
 	Description           string     `json:"description"`
 	Status                string     `json:"status"`
+	ApprovalMode          string     `json:"approval_mode"`
 	OwnerPrincipalID      string     `json:"-"`
 	Role                  string     `json:"role,omitempty"`
 	BaseGitHead           string     `json:"base_git_head,omitempty"`
@@ -83,6 +89,7 @@ type CreateInput struct {
 	WorkspacePath   string
 	Label           string
 	Description     string
+	ApprovalMode    string
 	BaseGitHead     string
 	BaseTreeDigest  string
 	ClientRequestID string
@@ -144,6 +151,13 @@ func (s *Service) Create(ctx context.Context, principal auth.Principal, in Creat
 	if strings.TrimSpace(in.Label) == "" {
 		in.Label = "Remote development session"
 	}
+	in.ApprovalMode = strings.ToLower(strings.TrimSpace(in.ApprovalMode))
+	if in.ApprovalMode == "" {
+		in.ApprovalMode = ApprovalModeStandard
+	}
+	if !validApprovalMode(in.ApprovalMode) {
+		return CreateResult{}, fmt.Errorf("%w: invalid approval mode", ErrInvalidInput)
+	}
 	now := s.now().UTC()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -186,16 +200,16 @@ func (s *Service) Create(ctx context.Context, principal auth.Principal, in Creat
 	expiresAt := now.Add(24 * time.Hour)
 	session := Session{
 		ID: sessionID, WorkspaceName: in.WorkspaceName, WorkspacePath: in.WorkspacePath,
-		Label: in.Label, Description: in.Description, Status: "active",
+		Label: in.Label, Description: in.Description, Status: "active", ApprovalMode: in.ApprovalMode,
 		OwnerPrincipalID: principal.ID, Role: "owner", BaseGitHead: in.BaseGitHead,
 		BaseTreeDigest: in.BaseTreeDigest, Version: 1, CreatedAt: now, LastActiveAt: now,
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO remote_sessions
-        (id, workspace_name, workspace_path, label, description, status, owner_principal_id,
+        (id, workspace_name, workspace_path, label, description, status, approval_mode, owner_principal_id,
          base_git_head, base_tree_digest, version, created_at, last_active_at)
-        VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, 1, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, 1, ?, ?)`,
 		session.ID, session.WorkspaceName, session.WorkspacePath, session.Label, session.Description,
-		principal.ID, nullable(session.BaseGitHead), nullable(session.BaseTreeDigest), now.UnixMilli(), now.UnixMilli()); err != nil {
+		session.ApprovalMode, principal.ID, nullable(session.BaseGitHead), nullable(session.BaseTreeDigest), now.UnixMilli(), now.UnixMilli()); err != nil {
 		return CreateResult{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO remote_session_members
@@ -247,7 +261,7 @@ func (s *Service) List(ctx context.Context, principal auth.Principal, in ListInp
 		in.Limit = 20
 	}
 	query := `SELECT rs.id, rs.workspace_name, rs.workspace_path, rs.label, rs.description,
-        rs.status, rs.owner_principal_id, m.role, COALESCE(rs.base_git_head,''),
+        rs.status, COALESCE(rs.approval_mode,'standard'), rs.owner_principal_id, m.role, COALESCE(rs.base_git_head,''),
         COALESCE(rs.base_tree_digest,''), COALESCE(rs.environment_snapshot_id,''),
         rs.version, rs.created_at, rs.last_active_at, rs.closed_at
         FROM remote_sessions rs JOIN remote_session_members m ON m.remote_session_id = rs.id
@@ -301,8 +315,8 @@ func (s *Service) List(ctx context.Context, principal auth.Principal, in ListInp
 
 func (s *Service) Get(ctx context.Context, principal auth.Principal, sessionID string) (Session, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT rs.id, rs.workspace_name, rs.workspace_path, rs.label,
-        rs.description, rs.status, rs.owner_principal_id, m.role, COALESCE(rs.base_git_head,''),
-        COALESCE(rs.base_tree_digest,''), COALESCE(rs.environment_snapshot_id,''), rs.version,
+        rs.description, rs.status, COALESCE(rs.approval_mode,'standard'), rs.owner_principal_id, m.role,
+        COALESCE(rs.base_git_head,''), COALESCE(rs.base_tree_digest,''), COALESCE(rs.environment_snapshot_id,''), rs.version,
         rs.created_at, rs.last_active_at, rs.closed_at
         FROM remote_sessions rs JOIN remote_session_members m ON m.remote_session_id = rs.id
         WHERE rs.id = ? AND m.principal_id = ?`, sessionID, principal.ID)
@@ -313,9 +327,13 @@ func (s *Service) Get(ctx context.Context, principal auth.Principal, sessionID s
 	return session, err
 }
 
-func (s *Service) Update(ctx context.Context, principal auth.Principal, sessionID, label, description, status string, expectedVersion int) (Session, error) {
+func (s *Service) Update(ctx context.Context, principal auth.Principal, sessionID, label, description, status, approvalMode string, expectedVersion int) (Session, error) {
 	if status != "" && !validStatus(status) {
 		return Session{}, fmt.Errorf("%w: invalid remote session status", ErrInvalidInput)
+	}
+	approvalMode = strings.ToLower(strings.TrimSpace(approvalMode))
+	if approvalMode != "" && !validApprovalMode(approvalMode) {
+		return Session{}, fmt.Errorf("%w: invalid approval mode", ErrInvalidInput)
 	}
 	current, err := s.Get(ctx, principal, sessionID)
 	if err != nil {
@@ -336,10 +354,16 @@ func (s *Service) Update(ctx context.Context, principal auth.Principal, sessionI
 	if status == "" {
 		status = current.Status
 	}
+	if approvalMode == "" {
+		approvalMode = current.ApprovalMode
+	}
+	if approvalMode != current.ApprovalMode && current.Role != "owner" {
+		return Session{}, ErrForbidden
+	}
 	now := s.now().UTC()
-	res, err := s.db.ExecContext(ctx, `UPDATE remote_sessions SET label = ?, description = ?, status = ?,
+	res, err := s.db.ExecContext(ctx, `UPDATE remote_sessions SET label = ?, description = ?, status = ?, approval_mode = ?,
         version = version + 1, last_active_at = ?, closed_at = CASE WHEN ? IN ('closed','archived') THEN ? ELSE closed_at END
-        WHERE id = ? AND version = ?`, label, description, status, now.UnixMilli(), status, now.UnixMilli(), sessionID, expectedVersion)
+        WHERE id = ? AND version = ?`, label, description, status, approvalMode, now.UnixMilli(), status, now.UnixMilli(), sessionID, expectedVersion)
 	if err != nil {
 		return Session{}, err
 	}
@@ -347,7 +371,10 @@ func (s *Service) Update(ctx context.Context, principal auth.Principal, sessionI
 	if rows == 0 {
 		return Session{}, ErrConflict
 	}
-	_ = s.AddEvent(ctx, principal, Event{RemoteSessionID: sessionID, Type: "remote_session.updated", Summary: label, CreatedAt: now})
+	_ = s.AddEvent(ctx, principal, Event{
+		RemoteSessionID: sessionID, Type: "remote_session.updated", Summary: label, CreatedAt: now,
+		Metadata: map[string]any{"approval_mode": approvalMode},
+	})
 	return s.Get(ctx, principal, sessionID)
 }
 
@@ -460,7 +487,7 @@ func (s *Service) Close(ctx context.Context, principal auth.Principal, sessionID
 	if status != "closed" && status != "archived" {
 		return Session{}, fmt.Errorf("%w: close status must be closed or archived", ErrInvalidInput)
 	}
-	return s.Update(ctx, principal, sessionID, current.Label, current.Description, status, current.Version)
+	return s.Update(ctx, principal, sessionID, current.Label, current.Description, status, "", current.Version)
 }
 
 func (s *Service) AddEvent(ctx context.Context, principal auth.Principal, event Event) error {
@@ -555,7 +582,7 @@ func scanSession(row scanner) (Session, error) {
 	var createdAt, lastActiveAt int64
 	var closedAt sql.NullInt64
 	err := row.Scan(&session.ID, &session.WorkspaceName, &session.WorkspacePath, &session.Label,
-		&session.Description, &session.Status, &session.OwnerPrincipalID, &session.Role,
+		&session.Description, &session.Status, &session.ApprovalMode, &session.OwnerPrincipalID, &session.Role,
 		&session.BaseGitHead, &session.BaseTreeDigest, &session.EnvironmentSnapshotID,
 		&session.Version, &createdAt, &lastActiveAt, &closedAt)
 	if err != nil {
@@ -599,6 +626,15 @@ func insertEventTx(ctx context.Context, tx *sql.Tx, event Event) (int64, error) 
 func validStatus(status string) bool {
 	switch status {
 	case "active", "idle", "blocked", "closed", "archived":
+		return true
+	default:
+		return false
+	}
+}
+
+func validApprovalMode(mode string) bool {
+	switch mode {
+	case ApprovalModeStandard, ApprovalModeTrusted:
 		return true
 	default:
 		return false

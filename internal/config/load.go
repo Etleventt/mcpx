@@ -74,6 +74,9 @@ func LoadGlobal(path string) (Config, error) {
 	if err := ValidateSecurityRules(overlay.Security); err != nil {
 		return base, fmt.Errorf("validate %s: %w", path, err)
 	}
+	if err := ValidateMCPDiscovery(overlay.Discovery.MCP); err != nil {
+		return base, fmt.Errorf("validate %s: %w", path, err)
+	}
 	merged := merge(base, overlay, true)
 	if err := ValidateRetention(merged.State.Retention); err != nil {
 		return base, fmt.Errorf("validate %s: %w", path, err)
@@ -97,6 +100,9 @@ func LoadProject(workspacePath string) (Config, error) {
 	}
 	if err := ValidateSecurityRules(c.Security); err != nil {
 		return Config{}, fmt.Errorf("validate %s: %w", path, err)
+	}
+	if strings.TrimSpace(c.Discovery.MCP.ProjectConfig) != "" {
+		return Config{}, fmt.Errorf("validate %s: discovery.mcp.project_config is process-wide", path)
 	}
 	return c, nil
 }
@@ -234,6 +240,9 @@ func merge(global, project Config, mergeAuth bool) Config {
 	}
 	if project.Discovery.MCP.EnabledSet {
 		out.Discovery.MCP.Enabled = project.Discovery.MCP.Enabled
+	}
+	if mergeAuth && project.Discovery.MCP.ProjectConfig != "" {
+		out.Discovery.MCP.ProjectConfig = project.Discovery.MCP.ProjectConfig
 	}
 	if project.Discovery.Skills.EnabledSet {
 		out.Discovery.Skills.Enabled = project.Discovery.Skills.Enabled

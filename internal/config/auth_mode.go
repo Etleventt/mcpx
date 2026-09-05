@@ -35,6 +35,15 @@ func ValidateSecurityRules(s SecurityConfig) error {
 	return nil
 }
 
+func ValidateMCPDiscovery(discovery MCPDiscovery) error {
+	switch strings.ToLower(strings.TrimSpace(discovery.ProjectConfig)) {
+	case "", "allow", "confirm", "deny":
+		return nil
+	default:
+		return fmt.Errorf("discovery.mcp.project_config must be allow|confirm|deny")
+	}
+}
+
 // EffectiveAuthMode resolves auth.mode with backward-compatible defaults.
 func EffectiveAuthMode(a AuthConfig) string {
 	m := strings.ToLower(strings.TrimSpace(a.Mode))

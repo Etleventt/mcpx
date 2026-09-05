@@ -148,7 +148,7 @@ func (h *Handler) authorizeGet(w http.ResponseWriter, r *http.Request) {
 	if err := h.validateAuthorizeParams(clientID, redirectURI, challenge, method); err != nil {
 		logging.L().Info("oauth authorize",
 			"component", "oauth", "method", "GET", "client_id", clientID,
-			"redirect_uri", redirectURI, "has_state", q.Get("state") != "",
+			"redirect_host", redirectHost(redirectURI), "has_state", q.Get("state") != "",
 			"state_len", len(q.Get("state")), "resource", resource,
 			"scope", scope, "error", err.Error())
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -156,7 +156,7 @@ func (h *Handler) authorizeGet(w http.ResponseWriter, r *http.Request) {
 	}
 	logging.L().Info("oauth authorize",
 		"component", "oauth", "method", "GET", "client_id", clientID,
-		"redirect_uri", redirectURI, "has_state", state != "",
+		"redirect_host", redirectHost(redirectURI), "has_state", state != "",
 		"state_len", len(state), "resource", resource,
 		"scope", scope, "ok", true)
 	c, _ := h.S.ResolveClient(clientID)
@@ -200,7 +200,7 @@ func (h *Handler) authorizePost(w http.ResponseWriter, r *http.Request) {
 	if err := h.validateAuthorizeParams(clientID, redirectURI, challenge, method); err != nil {
 		logging.L().Info("oauth authorize",
 			"component", "oauth", "method", "POST", "client_id", clientID,
-			"redirect_uri", redirectURI, "has_state", state != "",
+			"redirect_host", redirectHost(redirectURI), "has_state", state != "",
 			"state_len", len(state), "error", err.Error())
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -209,14 +209,14 @@ func (h *Handler) authorizePost(w http.ResponseWriter, r *http.Request) {
 	if !passwordOK {
 		logging.L().Info("oauth authorize",
 			"component", "oauth", "method", "POST", "client_id", clientID,
-			"redirect_uri", redirectURI, "has_state", state != "",
+			"redirect_host", redirectHost(redirectURI), "has_state", state != "",
 			"state_len", len(state), "password_ok", false)
 		http.Error(w, "invalid password", http.StatusUnauthorized)
 		return
 	}
 	logging.L().Info("oauth authorize",
 		"component", "oauth", "method", "POST", "client_id", clientID,
-		"redirect_uri", redirectURI, "has_state", state != "",
+		"redirect_host", redirectHost(redirectURI), "has_state", state != "",
 		"state_len", len(state), "password_ok", true)
 	if resource == "" {
 		origin := h.S.EffectiveIssuer(OriginFromRequest(r, false))
@@ -226,7 +226,7 @@ func (h *Handler) authorizePost(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logging.L().Info("oauth authorize",
 			"component", "oauth", "method", "POST", "client_id", clientID,
-			"redirect_uri", redirectURI, "has_state", state != "",
+			"redirect_host", redirectHost(redirectURI), "has_state", state != "",
 			"state_len", len(state), "error", err.Error())
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -244,9 +244,17 @@ func (h *Handler) authorizePost(w http.ResponseWriter, r *http.Request) {
 	u.RawQuery = q.Encode()
 	logging.L().Info("oauth authorize redirect",
 		"component", "oauth", "client_id", clientID,
-		"redirect_target", u.String(), "has_state", state != "",
-		"state_len", len(state), "code_len", len(code))
+		"redirect_host", u.Host, "has_state", state != "",
+		"state_len", len(state), "code_issued", code != "")
 	http.Redirect(w, r, u.String(), http.StatusFound)
+}
+
+func redirectHost(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return "invalid"
+	}
+	return parsed.Host
 }
 
 func (h *Handler) validateAuthorizeParams(clientID, redirectURI, challenge, method string) error {

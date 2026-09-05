@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +36,13 @@ func TestGatewayAccessLogRecordsDuration(t *testing.T) {
 	server := httptest.NewServer(NewGateway(cfg, nil, inner).Handler())
 	defer server.Close()
 
-	response, err := http.Get(server.URL + "/mcp")
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/mcp", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set(relayRequestIDHeader, "hr_test_relay")
+	request.Header.Set(mcpxStartedAtHeader, strconv.FormatInt(time.Now().Add(-20*time.Millisecond).UnixMilli(), 10))
+	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +52,10 @@ func TestGatewayAccessLogRecordsDuration(t *testing.T) {
 		t.Fatalf("missing response timing trailers: %+v", response.Trailer)
 	}
 	log := output.String()
-	if !strings.Contains(log, "component=mcp_http") || !strings.Contains(log, "duration_ms=") || !strings.Contains(log, "status=200") {
+	if response.Header.Get(relayRequestIDHeader) != "hr_test_relay" {
+		t.Fatalf("relay request id not echoed: %q", response.Header.Get(relayRequestIDHeader))
+	}
+	if !strings.Contains(log, "component=mcp_http") || !strings.Contains(log, "duration_ms=") || !strings.Contains(log, "status=200") || !strings.Contains(log, "relay_request_id=hr_test_relay") {
 		t.Fatalf("missing HTTP access log fields: %s", log)
 	}
 }

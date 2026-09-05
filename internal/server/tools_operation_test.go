@@ -112,6 +112,7 @@ func TestAsyncToolReturnsOperationAndWaitsForResult(t *testing.T) {
 
 func TestAsyncCommandOperationWaitsForTerminalTask(t *testing.T) {
 	rt := newWorkspaceRuntime(t, "demo")
+	rt.cfg.Security.Commands.Allow = append(rt.cfg.Security.Commands.Allow, `^sleep\b`)
 	session := operationTestSession(t, rt, "demo")
 	accepted := callOperationTool(t, rt, "command_run", map[string]any{
 		"session_id": session.ID, "purpose": "验证异步命令完成语义", "execution_mode": "async",

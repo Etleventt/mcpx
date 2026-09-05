@@ -75,6 +75,14 @@ func (r *Runtime) toolChangeDiff(ctx context.Context, req *mcp.CallToolRequest) 
 	if item.RemoteSessionID != session.ID {
 		return r.changeError(envReq, session.ID, session.WorkspaceName, changeset.ErrNotFound)
 	}
+	_, hasOffset := envReq.Payload["offset"]
+	if hasOffset || intPayload(envReq.Payload, "limit") != 0 {
+		data, err := changeDiffPageData(item, intPayload(envReq.Payload, "offset"), intPayload(envReq.Payload, "limit"))
+		if err != nil {
+			return r.changeError(envReq, session.ID, session.WorkspaceName, err)
+		}
+		return compactToolResult(data, "Read a bounded page of the complete Changeset diff."), nil
+	}
 	return changeDiffResult(item), nil
 }
 
@@ -307,16 +315,17 @@ func parseChangeOperations(value any) ([]changeset.Operation, error) {
 }
 
 const (
-	diffInlineMaxBytes       = 256 << 10 // 256 KiB inline budget
+	diffInlineMaxBytes       = 16 << 10 // 16 KiB default combined diff budget
 	diffPreviewLines         = 100
-	diffFilePreviewMaxBytes  = 32 << 10 // 32 KiB per-file UI preview budget
-	diffFilesPreviewMaxBytes = 64 << 10 // 64 KiB aggregate per-file UI preview budget
+	diffFilePreviewMaxBytes  = 4 << 10 // 4 KiB per-file UI preview budget
+	diffFilesPreviewMaxBytes = 8 << 10 // 8 KiB aggregate per-file UI preview budget
 )
 
 func changeSummaryDTO(item changeset.Changeset) map[string]any {
-	files := make([]map[string]any, 0, len(item.Files))
+	displayFiles := changeset.DisplayFileChanges(item.Files)
+	files := make([]map[string]any, 0, len(displayFiles))
 	previewBudget := diffFilesPreviewMaxBytes
-	for _, f := range item.Files {
+	for _, f := range displayFiles {
 		file := map[string]any{
 			"path": f.Path, "new_path": f.NewPath, "operation": f.Operation,
 			"original_sha256": f.OriginalSHA256, "proposed_sha256": f.ProposedSHA256,
@@ -366,13 +375,17 @@ func changeSummaryDTO(item changeset.Changeset) map[string]any {
 		diff["unified_diff"] = item.UnifiedDiff
 	} else {
 		diff["mode"] = "resource"
+		diff["next_action"] = changeDiffPageAction(item, 0, diffInlineMaxBytes)
 		// Preview only — never embed full large diff in structured/text.
-		diff["unified_diff_preview"] = trimDiffPreview(item.UnifiedDiff, diffPreviewLines)
+		preview, _ := boundedDiffPreview(item.UnifiedDiff, diffInlineMaxBytes)
+		diff["unified_diff_preview"] = preview
+		diff["truncated"] = true
 	}
 	dto := map[string]any{
 		"changeset_id": item.ID, "remote_session_id": item.RemoteSessionID,
 		"status": item.Status, "summary": item.Summary, "digest": item.Digest,
 		"files": files, "diff": diff, "created_at": item.CreatedAt,
+		"files_count": len(displayFiles), "operations_count": len(item.Files),
 		"source_changeset_id": item.SourceChangesetID,
 	}
 	if item.DiscardedAt != nil {
@@ -481,7 +494,10 @@ func deleteSummaryDisplay(dto map[string]any) string {
 }
 
 func fileDiffPreview(item changeset.FileChange, maxBytes int) (string, bool) {
-	diff := changeset.UnifiedDiffForFile(item)
+	return boundedDiffPreview(changeset.UnifiedDiffForFile(item), maxBytes)
+}
+
+func boundedDiffPreview(diff string, maxBytes int) (string, bool) {
 	if diff == "" || maxBytes <= 0 {
 		return "", false
 	}

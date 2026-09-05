@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -46,6 +45,7 @@ type SearchResult struct {
 }
 
 type SearchOptions struct {
+	Paths          []string
 	Query          string
 	Pattern        string
 	ExcludePattern string
@@ -89,13 +89,17 @@ func List(root, pattern, cursor string, limit int, includeHashes bool, allowed f
 	return ListWith(root, pattern, "", cursor, limit, includeHashes, allowed)
 }
 
-// ListWith adds a server-side exclude glob so callers stop walking once their
-// requested result budget is met instead of loading and filtering a full page.
+// ListWith retains the existing API; ListScoped also accepts explicit roots.
 func ListWith(root, pattern, excludePattern, cursor string, limit int, includeHashes bool, allowed func(string) bool) (ListResult, error) {
+	return ListScoped(root, pattern, excludePattern, nil, cursor, limit, includeHashes, allowed)
+}
+
+// ListScoped computes an exact total within the requested scope, not the entire workspace.
+func ListScoped(root, pattern, excludePattern string, scopes []string, cursor string, limit int, includeHashes bool, allowed func(string) bool) (ListResult, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	paths, err := paths(root, pattern, excludePattern, allowed)
+	paths, err := pathsScoped(root, pattern, excludePattern, scopes, allowed)
 	if err != nil {
 		return ListResult{}, err
 	}
@@ -162,7 +166,7 @@ func SearchWith(root string, opts SearchOptions, allowed func(string) bool) (Sea
 			return SearchResult{}, fmt.Errorf("invalid regular expression: %w", err)
 		}
 	}
-	filePaths, err := paths(root, opts.Pattern, opts.ExcludePattern, allowed)
+	filePaths, err := pathsScoped(root, opts.Pattern, opts.ExcludePattern, opts.Paths, allowed)
 	if err != nil {
 		return SearchResult{}, err
 	}
@@ -601,10 +605,24 @@ func shallowGoImports(content string) []string {
 // filepath.Match semantics for ordinary patterns and additionally supports the
 // recursive ** wildcard used by MCP include/exclude globs.
 func MatchGlob(pattern, value string) (bool, error) {
+	match, err := CompileGlob(pattern)
+	if err != nil {
+		return false, err
+	}
+	return match(value), nil
+}
+
+// CompileGlob creates a request-local matcher; no unbounded global cache is kept.
+func CompileGlob(pattern string) (func(string) bool, error) {
 	pattern = filepath.ToSlash(pattern)
-	value = filepath.ToSlash(value)
 	if !strings.Contains(pattern, "**") {
-		return filepath.Match(pattern, value)
+		if _, err := filepath.Match(pattern, ""); err != nil {
+			return nil, err
+		}
+		return func(value string) bool {
+			matched, _ := filepath.Match(pattern, filepath.ToSlash(value))
+			return matched
+		}, nil
 	}
 	var expression strings.Builder
 	expression.WriteString("^")
@@ -629,7 +647,7 @@ func MatchGlob(pattern, value string) (bool, error) {
 		case '[':
 			end := strings.IndexByte(pattern[index+1:], ']')
 			if end < 0 {
-				return false, fmt.Errorf("invalid pattern: unterminated character class")
+				return nil, fmt.Errorf("invalid pattern: unterminated character class")
 			}
 			end += index + 1
 			class := pattern[index : end+1]
@@ -645,64 +663,13 @@ func MatchGlob(pattern, value string) (bool, error) {
 	expression.WriteString("$")
 	compiled, err := regexp.Compile(expression.String())
 	if err != nil {
-		return false, fmt.Errorf("invalid pattern: %w", err)
+		return nil, fmt.Errorf("invalid pattern: %w", err)
 	}
-	return compiled.MatchString(value), nil
+	return func(value string) bool { return compiled.MatchString(filepath.ToSlash(value)) }, nil
 }
 
 func paths(root, pattern, excludePattern string, allowed func(string) bool) ([]string, error) {
-	root, err := filepath.Abs(root)
-	if err != nil {
-		return nil, err
-	}
-	var result []string
-	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
-		if path == root {
-			return nil
-		}
-		if entry.IsDir() {
-			if ignoredDirectories[entry.Name()] {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if !entry.Type().IsRegular() {
-			return nil
-		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return nil
-		}
-		relative = filepath.ToSlash(relative)
-		if allowed != nil && !allowed(relative) {
-			return nil
-		}
-		if pattern != "" {
-			matched, err := MatchGlob(pattern, relative)
-			if err != nil {
-				return fmt.Errorf("invalid pattern: %w", err)
-			}
-			if !matched {
-				return nil
-			}
-		}
-		if excludePattern != "" {
-			excluded, err := MatchGlob(excludePattern, relative)
-			if err != nil {
-				return fmt.Errorf("invalid exclude pattern: %w", err)
-			}
-			if excluded {
-				return nil
-			}
-		}
-		result = append(result, relative)
-		return nil
-	})
-	sort.Strings(result)
-	return result, err
+	return pathsScoped(root, pattern, excludePattern, nil, allowed)
 }
 
 func literalIndices(line, query string) [][]int {

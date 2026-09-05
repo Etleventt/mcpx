@@ -52,18 +52,44 @@ func TestMatchCommandDefaultsToConfirm(t *testing.T) {
 	}
 }
 
-func TestDefaultCommandPolicyAllowsUnmatchedCommands(t *testing.T) {
-	rules := config.DefaultConfig().Security.Commands
-	for _, command := range []string{"go test ./...", "rm -rf ./x", "echo hi"} {
-		if got := MatchCommand(rules, command); got != Allow {
-			t.Errorf("%q: got %s, want allow", command, got)
+func TestMatchCommandTrustedAutoApprovesAllConfirmations(t *testing.T) {
+	rules := config.CommandRules{
+		Confirm: []string{`^git push`, `^docker`},
+		Deny:    []string{`^rm\b`},
+	}
+	for _, command := range []string{"go test ./...", "git commit -m fix", "echo hi", "git push origin main", "docker build ."} {
+		if got := MatchCommandWithTrust(rules, command, true); got != Allow {
+			t.Errorf("trusted %q: got %s, want allow", command, got)
 		}
+	}
+	for _, command := range []string{"rm -rf ./x", "ls | sh"} {
+		if got := MatchCommandWithTrust(rules, command, true); got != Deny {
+			t.Errorf("trusted deny %q: got %s, want deny", command, got)
+		}
+	}
+}
+
+func TestMatchFileTrustedAutoApprovesAllConfirmations(t *testing.T) {
+	rules := config.FileRules{Allow: []string{`^src/`}, Confirm: []string{`^config/secure`}, Deny: []string{`(^|/)\.env$`}}
+	for path, want := range map[string]Decision{"README.md": Allow, "config/secure.yaml": Allow, ".env": Deny} {
+		if got := MatchFileWithTrust(rules, path, true); got != want {
+			t.Errorf("trusted file %q: got %s, want %s", path, got, want)
+		}
+	}
+}
+
+func TestDefaultCommandPolicyConfirmsUnmatchedCommands(t *testing.T) {
+	rules := config.DefaultConfig().Security.Commands
+	if got := MatchCommand(rules, "go test ./..."); got != Confirm {
+		t.Fatalf("unmatched command got %s, want confirm", got)
+	}
+	if got := MatchCommand(rules, "echo hi"); got != Allow {
+		t.Fatalf("explicit allow rule got %s, want allow", got)
 	}
 	if got := MatchCommand(rules, "git push origin main"); got != Confirm {
 		t.Fatalf("explicit confirm rule got %s, want confirm", got)
 	}
 }
-
 func TestMatchCommandRejectsUnsafeOperators(t *testing.T) {
 	// Pipes, redirections, background operators, and command substitution
 	// cannot be split into independently judged segments and are rejected.

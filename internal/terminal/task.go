@@ -94,7 +94,10 @@ type Task struct {
 }
 
 const maxTaskLogBytes = 1 << 20
-const maxPersistedTaskLogBytes = 32 << 20
+
+// MaxPersistedTaskLogBytes bounds durable task logs and the default cumulative
+// observation budget for a task across stdout and stderr.
+const MaxPersistedTaskLogBytes = 32 << 20
 
 // TaskManager tracks long tasks per process.
 type TaskManager struct {
@@ -357,13 +360,13 @@ func (t *Task) emitOutputFinal() {
 }
 
 func writeBounded(file *os.File, size *int64, content []byte, truncated *bool) error {
-	if file == nil || *size >= maxPersistedTaskLogBytes {
+	if file == nil || *size >= MaxPersistedTaskLogBytes {
 		if file != nil && len(content) > 0 {
 			*truncated = true
 		}
 		return nil
 	}
-	remaining := maxPersistedTaskLogBytes - *size
+	remaining := MaxPersistedTaskLogBytes - *size
 	write := content
 	if int64(len(write)) > remaining {
 		write = write[:remaining]

@@ -72,7 +72,7 @@ func insertRetentionEvent(t *testing.T, db *sql.DB, workspace, remoteID, eventTy
 	return sequence
 }
 
-func TestRetentionProtectsActiveSessionsAndReferencedSnapshots(t *testing.T) {
+func TestRetentionBoundsSessionEventsAndReferencedSnapshots(t *testing.T) {
 	db, service, now := newRetentionTestService(t, "")
 	insertRetentionPrincipal(t, db, "principal")
 	insertRetentionSession(t, db, "active", "demo", "active", "principal")
@@ -114,19 +114,17 @@ func TestRetentionProtectsActiveSessionsAndReferencedSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.DeletedObservationEvents != 3 {
-		t.Fatalf("deleted observation events=%d, want 3; report=%+v", report.DeletedObservationEvents, report)
+	if report.DeletedObservationEvents != 5 {
+		t.Fatalf("deleted observation events=%d, want 5; report=%+v", report.DeletedObservationEvents, report)
 	}
-	for _, sequence := range []int64{activeProcess, activeMemory, secondRecent} {
-		var count int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM observation_events WHERE sequence = ?`, sequence).Scan(&count); err != nil {
-			t.Fatal(err)
-		}
-		if count != 1 {
-			t.Fatalf("protected/recent event %d was deleted", sequence)
-		}
+	var recentCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM observation_events WHERE sequence = ?`, secondRecent).Scan(&recentCount); err != nil {
+		t.Fatal(err)
 	}
-	for _, sequence := range []int64{processOld, closedMemory, firstRecent} {
+	if recentCount != 1 {
+		t.Fatalf("recent event %d was deleted", secondRecent)
+	}
+	for _, sequence := range []int64{processOld, activeProcess, closedMemory, activeMemory, firstRecent} {
 		var count int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM observation_events WHERE sequence = ?`, sequence).Scan(&count); err != nil {
 			t.Fatal(err)

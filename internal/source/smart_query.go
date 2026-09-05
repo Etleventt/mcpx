@@ -13,6 +13,7 @@ import (
 
 // SmartQueryOptions controls the exact/token search gateway.
 type SmartQueryOptions struct {
+	Paths           []string
 	Query           string
 	Mode            string
 	Parallel        bool
@@ -62,39 +63,41 @@ func SmartQueryPage(root string, opts SmartQueryOptions) (map[string]any, error)
 		opts.MaxBytesPerFile = 64 << 10
 	}
 	analysis := AnalyzeQuery(opts.Query)
-	paths, err := paths(root, opts.Pattern, opts.ExcludePattern, opts.Allowed)
+	paths, err := pathsScoped(root, opts.Pattern, opts.ExcludePattern, opts.Paths, opts.Allowed)
 	if err != nil {
 		return nil, err
 	}
-	documents := loadSmartDocuments(root, paths)
-
+	// Keep only one batch of file bodies in memory, even for a whole-workspace query.
+	const documentBatchSize = 16
+	merged := make(map[string]*smartCandidate)
 	runExact := mode == "smart" || mode == "exact"
 	runToken := mode == "smart" || mode == "token"
-	var exactCandidates, tokenCandidates []smartCandidate
-	if opts.Parallel && runExact && runToken {
-		var wait sync.WaitGroup
-		wait.Add(2)
-		go func() {
-			defer wait.Done()
-			exactCandidates = exactRecall(opts.Query, documents)
-		}()
-		go func() {
-			defer wait.Done()
-			tokenCandidates = tokenRecall(analysis, documents)
-		}()
-		wait.Wait()
-	} else {
-		if runExact {
-			exactCandidates = exactRecall(opts.Query, documents)
+	for start := 0; start < len(paths); start += documentBatchSize {
+		documents := loadSmartDocuments(root, paths[start:min(start+documentBatchSize, len(paths))])
+		var exactCandidates, tokenCandidates []smartCandidate
+		if opts.Parallel && runExact && runToken {
+			var wait sync.WaitGroup
+			wait.Add(2)
+			go func() {
+				defer wait.Done()
+				exactCandidates = exactRecall(opts.Query, documents)
+			}()
+			go func() {
+				defer wait.Done()
+				tokenCandidates = tokenRecall(analysis, documents)
+			}()
+			wait.Wait()
+		} else {
+			if runExact {
+				exactCandidates = exactRecall(opts.Query, documents)
+			}
+			if runToken {
+				tokenCandidates = tokenRecall(analysis, documents)
+			}
 		}
-		if runToken {
-			tokenCandidates = tokenRecall(analysis, documents)
+		for _, candidate := range append(exactCandidates, tokenCandidates...) {
+			mergeSmartCandidate(merged, candidate)
 		}
-	}
-
-	merged := make(map[string]*smartCandidate, len(exactCandidates)+len(tokenCandidates))
-	for _, candidate := range append(exactCandidates, tokenCandidates...) {
-		mergeSmartCandidate(merged, candidate)
 	}
 	ordered := make([]*smartCandidate, 0, len(merged))
 	for _, candidate := range merged {
@@ -232,6 +235,7 @@ func tokenRecall(analysis QueryAnalysis, documents []smartDocument) []smartCandi
 		matches := map[string]bool{}
 		title := strings.ToLower(document.Title)
 		body := strings.ToLower(document.Content)
+		normalizedBody := normalizeIdentifier(body)
 		path := normalizeIdentifier(document.Path)
 		for _, phrase := range analysis.Phrases {
 			if strings.Contains(title, strings.ToLower(phrase)) || strings.Contains(path, normalizeIdentifier(phrase)) {
@@ -246,7 +250,7 @@ func tokenRecall(analysis QueryAnalysis, documents []smartDocument) []smartCandi
 			if strings.Contains(title, strings.ToLower(token)) || strings.Contains(path, normalizeIdentifier(token)) {
 				score += 20
 				matches[token] = true
-			} else if strings.Contains(body, strings.ToLower(token)) || strings.Contains(normalizeIdentifier(body), normalizeIdentifier(token)) {
+			} else if strings.Contains(body, strings.ToLower(token)) || strings.Contains(normalizedBody, normalizeIdentifier(token)) {
 				score += 5
 				matches[token] = true
 			}

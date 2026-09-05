@@ -13,12 +13,13 @@ import (
 )
 
 const (
-	requestIDHeader     = "X-Request-ID"
-	mcpxRequestIDHeader = "X-MCPX-Request-ID"
-	traceparentHeader   = "Traceparent"
-	mcpxTraceIDHeader   = "X-MCPX-Trace-ID"
-	mcpxSpanIDHeader    = "X-MCPX-Span-ID"
-	mcpxStartedAtHeader = "X-MCPX-Started-At-Ms"
+	requestIDHeader      = "X-Request-ID"
+	mcpxRequestIDHeader  = "X-MCPX-Request-ID"
+	relayRequestIDHeader = "X-MCPX-Relay-Request-ID"
+	traceparentHeader    = "Traceparent"
+	mcpxTraceIDHeader    = "X-MCPX-Trace-ID"
+	mcpxSpanIDHeader     = "X-MCPX-Span-ID"
+	mcpxStartedAtHeader  = "X-MCPX-Started-At-Ms"
 )
 
 type runtimeContextKey struct{}
@@ -29,6 +30,7 @@ type operationChildKey struct{}
 // from tool arguments and is not part of an MCP input schema.
 type RuntimeContext struct {
 	RequestID         string
+	RelayRequestID    string
 	OperationID       string
 	ParentOperationID string
 	StepID            string
@@ -78,7 +80,7 @@ func runtimeContextFromHeaders(headers http.Header, received time.Time) RuntimeC
 		traceID = newRuntimeID("tr", 16)
 	}
 	return RuntimeContext{
-		RequestID: requestID, TraceID: traceID, SpanID: newRuntimeID("sp", 8), ParentSpanID: parentSpanID,
+		RequestID: requestID, RelayRequestID: firstHeader(headers, relayRequestIDHeader), TraceID: traceID, SpanID: newRuntimeID("sp", 8), ParentSpanID: parentSpanID,
 		StartedAtMs: startedAtMs, ReceivedAtMs: receivedAtMs,
 	}
 }

@@ -1922,7 +1922,7 @@ func digestFiles(files []FileChange) string {
 
 func unifiedDiff(files []FileChange) string {
 	var builder strings.Builder
-	for _, item := range files {
+	for _, item := range DisplayFileChanges(files) {
 		builder.WriteString(UnifiedDiffForFile(item))
 	}
 	return builder.String()
@@ -1949,20 +1949,7 @@ func UnifiedDiffForFile(item FileChange) string {
 }
 
 func diffFile(oldPath, newPath string, oldContent, newContent []byte) string {
-	oldLines, newLines := splitLines(string(oldContent)), splitLines(string(newContent))
-	if oldPath == newPath && string(oldContent) == string(newContent) {
-		return ""
-	}
-	var builder strings.Builder
-	fmt.Fprintf(&builder, "--- %s\n+++ %s\n", oldPath, newPath)
-	fmt.Fprintf(&builder, "@@ -%d,%d +%d,%d @@\n", firstLine(len(oldLines)), len(oldLines), firstLine(len(newLines)), len(newLines))
-	for _, line := range oldLines {
-		builder.WriteString("-" + line + "\n")
-	}
-	for _, line := range newLines {
-		builder.WriteString("+" + line + "\n")
-	}
-	return builder.String()
+	return compactDiffFile(oldPath, newPath, oldContent, newContent)
 }
 
 func splitLines(content string) []string {
