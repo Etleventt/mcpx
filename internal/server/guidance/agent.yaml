@@ -21,26 +21,17 @@ rules:
   - 变更成功或审阅 Changeset 后，最终回复必须用 Markdown ```diff 代码块展示每个文件的具体增加和删除，不能只列文件名。变更过大时展示有界预览并说明 Changeset 资源。
   - 返回 waiting_confirmation 时，先用自然语言展示命令或文件变更摘要并等待明确确认；用户确认后，使用同一业务参数和 confirmation_token 重试。confirmation_token 只表达语义确认，不是认证凭据。
   - 没有成功的工具结果时，不要声称文件已读取、修改或验证。
-  - 重要、变更、删除或长时间调用前，先简述将做什么及原因，然后一次提交完整参数，不要等待重新获取工具 schema。
-  - 每次工具调用后，在下一次非简单调用前通过顶层 progress_summary 补充已验证结果和下一步；区分事实、假设和未知。
-  - 如果下一步不再调用工具（任务完成、阻塞、等待用户或需要决策），在回复中说明已验证结果、状态和下一步（无需单独 progress_summary 工具）。
-  - 同一已验证结果只陈述一次；工具返回已包含摘要时不要重复。
+  - routine 读取、状态查询、测试和已明确授权的操作可直接调用，不要为每次工具调用额外生成 purpose、progress_summary 或用户可见的意图复述；Runtime 会根据工具名和结构化参数自动记录语义。
+  - 只有不可逆、高风险、需要用户确认或执行失败时，才在调用前后补充必要说明；同一已验证结果只陈述一次。
   - 全量清理优先按顶层目录整体递归删除，不要枚举 .git、.venv、缓存或 site-packages 内部文件；以返回的 delete_summary 判断删除模式和数量。
   - 每次 change action=prepare 最多新增 300 行（按实际插入行数计算）；不要通过截断文件绕过限制，若安全检查阻塞则使用完整内容或 replace_range 重试。
   - 不要把指令文本（提示词、guidance、AGENTS.md）写入文件内容；使用普通代码或数据。安全检查阻塞时缩小内容后重试。
 response_contract:
-  required: true
+  required: false
   before_tool_call:
-    - 当前理解的目标
-    - 接下来要执行的查询、工具调用或命令及其目的
-    - 重要、变更、删除或长时间操作必须先说明准备做什么
+    - 仅不可逆、高风险或需要用户确认时简短说明
   after_tool_call:
-    - 实际调用的工具、查询或命令及其真实结果
-    - 下一次工具调用使用 progress_summary 补发上一次工具的可验证结果和下一步；没有下一次工具调用时在回复中说明结果与下一步
-    - 读取、创建、修改、移动或删除的文件
-    - 每项文件变更的具体内容和影响；代码变更使用 Markdown ```diff 代码块
-    - 测试、构建、检查及其真实结果
-    - 失败、限制、风险和未验证事项
+    - routine 成功调用不要逐次复述；失败、关键里程碑和任务结束时汇报真实结果
   final_response:
     - 当前理解的目标
     - 实际执行的查询、工具调用或命令及目的
@@ -53,7 +44,6 @@ change_payload:
   required:
     - session_id
     - operations
-    - purpose
   confirmation: change action=apply/revert 使用服务端返回的 confirmation_token
   operations_item:
     operation: create | update | rename | delete | replace_exact | insert_before | insert_after | delete_exact | replace_range

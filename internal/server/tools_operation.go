@@ -247,7 +247,7 @@ func (r *Runtime) validateOperationToolArguments(toolName string, arguments map[
 	}
 	merged := cloneArguments(arguments)
 	merged["session_id"] = sessionID
-	merged["purpose"] = purpose
+	_ = purpose
 	return validateOperationSchemaValue(merged, schema, "arguments")
 }
 
@@ -369,7 +369,7 @@ func (r *Runtime) operationError(envReq envelope.Request, session remotesession.
 func operationView(record operation.Record, includeResults bool) map[string]any {
 	data := map[string]any{
 		"operation_id": record.ID, "session_id": record.RemoteSessionID, "workspace": record.WorkspaceName,
-		"state": record.State, "purpose": record.Purpose,
+		"state": record.State,
 	}
 	steps := make([]map[string]any, 0, len(record.Steps))
 	for _, step := range record.Steps {

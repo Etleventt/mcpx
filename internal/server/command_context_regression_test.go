@@ -30,23 +30,21 @@ func TestCommandExecuteBindsPurposeAndWorkspaceScope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	missingPurpose := mcpresult.Request(map[string]any{
+	leanRequest := mcpresult.Request(map[string]any{
 		"remote_session_id": created.Session.ID, "command": "printf context",
 	})
-
-	missingResult, err := rt.toolCommandExecute(context.Background(), missingPurpose)
+	leanResult, err := rt.toolCommandExecute(context.Background(), leanRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	missing := decodeToolResult(t, missingResult)
-	if missing["status"] != "failed" {
-		t.Fatalf("missing purpose was accepted: %+v", missing)
+	lean := decodeToolResult(t, leanResult)
+	leanData, _ := lean["data"].(map[string]any)
+	if lean["status"] != "ok" || leanData["scope"] != "workspace" || leanData["workspace_scoped"] != true || leanData["purpose"] != nil {
+		t.Fatalf("lean command execution failed or leaked purpose: %+v", lean)
 	}
 
 	invalidScope := mcpresult.Request(map[string]any{
-		"intent":            "validate command scope",
-		"remote_session_id": created.Session.ID, "command": "printf context",
-		"purpose": "verify context binding", "scope": "host",
+		"remote_session_id": created.Session.ID, "command": "printf context", "scope": "host",
 	})
 
 	invalidResult, err := rt.toolCommandExecute(context.Background(), invalidScope)
@@ -60,9 +58,7 @@ func TestCommandExecuteBindsPurposeAndWorkspaceScope(t *testing.T) {
 
 	// Confirm rules create a pending action carrying the exact command context.
 	confirmationRequest := mcpresult.Request(map[string]any{
-		"intent":            "request semantic confirmation for a command",
-		"remote_session_id": created.Session.ID, "command": "echo confirmation",
-		"purpose": "verify confirmation context", "scope": "workspace",
+		"remote_session_id": created.Session.ID, "command": "echo confirmation", "scope": "workspace",
 	})
 
 	confirmationResult, err := rt.toolCommandExecute(context.Background(), confirmationRequest)
@@ -71,8 +67,8 @@ func TestCommandExecuteBindsPurposeAndWorkspaceScope(t *testing.T) {
 	}
 	confirmationResponse := decodeToolResult(t, confirmationResult)
 	confirmationData, _ := confirmationResponse["data"].(map[string]any)
-	if confirmationResponse["status"] != "waiting_confirmation" || confirmationData["purpose"] != "verify confirmation context" || confirmationData["scope"] != "workspace" {
-		t.Fatalf("confirm rule must create semantic confirmation: %+v", confirmationResponse)
+	if confirmationResponse["status"] != "waiting_confirmation" || confirmationData["purpose"] != nil || confirmationData["scope"] != "workspace" {
+		t.Fatalf("confirm rule must create lean semantic confirmation: %+v", confirmationResponse)
 	}
 	if text, ok := confirmationResult.Content[0].(*mcp.TextContent); ok {
 		marker := "confirmation_token: "
@@ -108,9 +104,7 @@ func TestCommandExecuteBindsPurposeAndWorkspaceScope(t *testing.T) {
 		t.Fatalf("stale token retry must explain the mismatch: %s", invalidMessage)
 	}
 	confirmRequest := mcpresult.Request(map[string]any{
-		"intent":            "用户已确认执行该命令",
-		"remote_session_id": created.Session.ID, "command": "echo confirmation",
-		"purpose": "verify confirmation context", "scope": "workspace", "confirmation_token": confirmationData["confirmation_token"],
+		"remote_session_id": created.Session.ID, "command": "echo confirmation", "scope": "workspace", "confirmation_token": confirmationData["confirmation_token"],
 	})
 
 	confirmed, err := rt.toolCommandExecute(context.Background(), confirmRequest)
@@ -163,8 +157,11 @@ func TestCommandExecuteBindsPurposeAndWorkspaceScope(t *testing.T) {
 	}
 	response := decodeToolResult(t, validResult)
 	data, _ := response["data"].(map[string]any)
-	if response["status"] != "ok" || data["purpose"] != "verify context binding" || data["scope"] != "workspace" || data["workspace_scoped"] != true {
-		t.Fatalf("execution context was not returned: %+v", response)
+	if response["status"] != "ok" || data["purpose"] != nil || data["scope"] != "workspace" || data["workspace_scoped"] != true {
+		t.Fatalf("execution context leaked narrative purpose or lost scope: %+v", response)
+	}
+	if commandRequestDigest("req-a", created.Session.ID, "demo", "printf context", "purpose-a", "workspace") != commandRequestDigest("req-b", created.Session.ID, "demo", "printf context", "purpose-b", "workspace") {
+		t.Fatal("command digest must not depend on request ID or narrative purpose")
 	}
 	if digest, _ := data["command_digest"].(string); !strings.HasPrefix(digest, "sha256:") {
 		t.Fatalf("missing command digest: %+v", data)

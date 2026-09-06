@@ -88,7 +88,7 @@ func TestAsyncToolReturnsOperationAndWaitsForResult(t *testing.T) {
 	session := operationTestSession(t, rt, "demo")
 
 	accepted := callOperationTool(t, rt, "source_read", map[string]any{
-		"session_id": session.ID, "purpose": "异步读取工作区", "execution_mode": "async", "view": "list", "limit": 5,
+		"session_id": session.ID, "execution_mode": "async", "view": "list", "limit": 5,
 	})
 	if accepted["status"] != "accepted" {
 		t.Fatalf("accepted response=%+v", accepted)
@@ -115,7 +115,7 @@ func TestAsyncCommandOperationWaitsForTerminalTask(t *testing.T) {
 	rt.cfg.Security.Commands.Allow = append(rt.cfg.Security.Commands.Allow, `^sleep\b`)
 	session := operationTestSession(t, rt, "demo")
 	accepted := callOperationTool(t, rt, "command_run", map[string]any{
-		"session_id": session.ID, "purpose": "验证异步命令完成语义", "execution_mode": "async",
+		"session_id": session.ID, "execution_mode": "async",
 		"command": "sleep 0.2", "yield_time_ms": 1,
 	})
 	if accepted["status"] != "accepted" {
@@ -199,7 +199,6 @@ func TestOperationBatchRunsAndRecordsChildSteps(t *testing.T) {
 	session := operationTestSession(t, rt, "demo")
 	accepted := callOperationTool(t, rt, "operation_batch", map[string]any{
 		"session_id": session.ID,
-		"purpose":    "并行读取工作区目录",
 		"operations": []any{
 			map[string]any{"id": "list_a", "tool": "source_read", "arguments": map[string]any{"view": "list", "limit": 5}},
 			map[string]any{"id": "list_b", "tool": "source_read", "arguments": map[string]any{"view": "list", "limit": 5}},
@@ -427,7 +426,7 @@ func TestOperationManageBatchValidationAndPermissions(t *testing.T) {
 	}
 
 	nested := callOperationTool(t, rt, "operation_batch", map[string]any{
-		"session_id": session.ID, "purpose": "批量读取结果", "operations": []any{
+		"session_id": session.ID, "operations": []any{
 			map[string]any{"id": "read", "tool": "operation_manage", "arguments": map[string]any{}},
 		},
 	})

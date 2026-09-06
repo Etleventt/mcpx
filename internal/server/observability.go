@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -17,7 +16,6 @@ import (
 )
 
 func (r *Runtime) addTool(s *mcp.Server, tool mcp.Tool, handler mcp.ToolHandler) {
-	tool = requireIntentSchema(tool)
 	// Intentionally omit OutputSchema: the full ARC envelope is ~5KB per tool and
 	// inflates tools/list past what ChatGPT Connector discovery accepts
 	// (invalid_response / "discover response was inconsistent"). Runtime still
@@ -52,34 +50,6 @@ func (r *Runtime) addTool(s *mcp.Server, tool mcp.Tool, handler mcp.ToolHandler)
 
 func boolPointerValue(value *bool) bool {
 	return value != nil && *value
-}
-
-func requireIntentSchema(tool mcp.Tool) mcp.Tool {
-	purpose := map[string]any{
-		"type":        "string",
-		"description": "本次调用的用户目标或语义用途；高风险工具会要求填写",
-	}
-	progressSummary := map[string]any{
-		"type":        "string",
-		"description": "上一工具调用后的可验证进度摘要、结果和下一步；没有下一次工具调用时请使用 progress_summary",
-	}
-	rawBytes := mcpresult.ToolSchemaJSON(tool)
-	var raw map[string]any
-	if err := json.Unmarshal(rawBytes, &raw); err != nil || raw == nil {
-		raw = map[string]any{"type": "object", "properties": map[string]any{}}
-	}
-	properties, _ := raw["properties"].(map[string]any)
-	if properties == nil {
-		properties = map[string]any{}
-	}
-	properties["purpose"] = purpose
-	properties["progress_summary"] = progressSummary
-	raw["type"] = "object"
-	raw["properties"] = properties
-	if encoded, marshalErr := json.Marshal(raw); marshalErr == nil {
-		tool.InputSchema = json.RawMessage(encoded)
-	}
-	return tool
 }
 
 func appendRequired(value any, required string) []string {

@@ -387,8 +387,8 @@ func (r *Runtime) registerConsolidatedToolsV2(s *mcp.Server) {
 		"required": []string{"id", "tool", "arguments"},
 	}, "带依赖关系的公开工具操作")
 	r.addTool(s, publicTool("operation_batch", toolDesc["operation_batch"], map[string]any{
-		"remote_session_id": remoteSession, "operations": operationSteps, "purpose": stringSchema("本次调用的目的；必须由用户明确提供"),
-	}, []string{"remote_session_id", "purpose", "operations"}, mutatingToolAnnotation), r.toolOperationBatch)
+		"remote_session_id": remoteSession, "operations": operationSteps,
+	}, []string{"remote_session_id", "operations"}, mutatingToolAnnotation), r.toolOperationBatch)
 	operationIDsSchema := arraySchema(map[string]any{"type": "string"}, "批量查询的异步操作 ID；最多 32 个，不要把 operation_manage 嵌套进 operation_batch")
 	operationIDsSchema["minItems"] = 1
 	operationIDsSchema["maxItems"] = operation.MaxBatchQueries
@@ -426,7 +426,7 @@ func (r *Runtime) registerConsolidatedToolsV2(s *mcp.Server) {
 	r.addTool(s, publicTool("session", toolDesc["session"], map[string]any{
 		"remote_session_id": remoteSession, "workspace": workspace, "action": enumSchema("生命周期动作", "open", "update", "handoff", "attach", "close"),
 		"label": stringSchema("会话标签"), "description": stringSchema("开发目标或新描述"), "client_request_id": stringSchema("客户端幂等键"),
-		"approval_mode":                enumSchema("确认模式；standard=按策略逐次确认，trusted=自动批准所有 MCPX confirmation；deny 与不安全 shell 结构仍会硬拒绝", "standard", "trusted"),
+		"approval_mode":                enumSchema("确认模式；省略则继承全局 remote_sessions.default_approval_mode；standard=按策略逐次确认，trusted=自动批准所有 MCPX confirmation；deny 与不安全 shell 结构仍会硬拒绝", "standard", "trusted"),
 		"include_instructions_content": booleanSchema("返回有界 AGENTS.md 内容"), "include_upstream_tools": booleanSchema("返回上游工具 schema"), "include_project_tasks": booleanSchema("返回项目任务"),
 		"known_revisions": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "客户端已知版本"},
 		"status":          stringSchema("新状态"), "expected_version": numberSchema("乐观锁版本"), "role": stringSchema("接力角色"), "expires_in": numberSchema("接力有效秒数"),
@@ -457,11 +457,10 @@ func (r *Runtime) registerConsolidatedToolsV2(s *mcp.Server) {
 		"apply":              booleanSchema("prepare 时是否立即应用；默认 false"),
 		"format":             booleanSchema("格式化变更文件"),
 		"verify":             arraySchema(map[string]any{"type": "string"}, "验证步骤"),
-		"purpose":            stringSchema("本次调用的目的；必须由用户明确提供"),
 		"changeset_id":       stringSchema("Changeset ID；apply/discard/revert 必填；须原样复制返回值"),
 		"expected_digest":    stringSchema("apply 必填；必须原样复制 prepare/read 返回的 digest；禁止填 diff 统计、tree_digest、snapshot ID 或空值"),
 		"confirmation_token": stringSchema("仅表示用户已确认同一变更，不是认证凭据"),
-	}, []string{"remote_session_id", "action", "purpose"}, mutatingToolAnnotation), r.toolChange)
+	}, []string{"remote_session_id", "action"}, mutatingToolAnnotation), r.toolChange)
 	r.addTool(s, publicTool("change_read", toolDesc["change_read"], map[string]any{
 		"remote_session_id": remoteSession, "view": enumSchema("读取视图", "diff", "history"), "changeset_id": stringSchema("Changeset ID"),
 		"limit": numberSchema("history 数量；diff 分页字节预算，最高 64 KiB"), "offset": numberSchema("diff 字节偏移；传 offset 或 limit 启用完整差异分页"),
@@ -470,9 +469,8 @@ func (r *Runtime) registerConsolidatedToolsV2(s *mcp.Server) {
 
 	r.addTool(s, publicTool("command_run", toolDesc["command_run"], map[string]any{
 		"remote_session_id": remoteSession, "command": stringSchema("shell 命令"), "task": stringSchema("项目任务名称"),
-		"purpose": stringSchema("执行原因"), "scope": enumSchema("执行范围", "workspace"),
-		"confirmation_token": stringSchema("仅表示用户已确认同一命令"), "yield_time_ms": numberSchema("等待时长"),
-	}, []string{"remote_session_id", "purpose"}, commandExecutionToolAnnotation), r.toolCommandRun)
+		"scope": enumSchema("执行范围", "workspace"), "confirmation_token": stringSchema("仅表示用户已确认同一命令"), "yield_time_ms": numberSchema("等待时长"),
+	}, []string{"remote_session_id"}, commandExecutionToolAnnotation), r.toolCommandRun)
 	r.addTool(s, publicTool("task_read", toolDesc["task_read"], map[string]any{
 		"remote_session_id": remoteSession, "view": enumSchema("读取视图", "list", "status", "logs", "ports", "diagnostics"),
 		"task_id": stringSchema("Task ID"), "known_task_digest": stringSchema("task_list_digest"), "stdout_offset": numberSchema("stdout 偏移"),
@@ -481,15 +479,15 @@ func (r *Runtime) registerConsolidatedToolsV2(s *mcp.Server) {
 	r.addTool(s, publicTool("task", toolDesc["task"], map[string]any{
 		"remote_session_id": remoteSession, "action": enumSchema("控制动作", "attach", "stop", "stdin"), "task_id": stringSchema("Task ID"),
 		"stdout_offset": numberSchema("stdout 偏移"), "stderr_offset": numberSchema("stderr 偏移"), "yield_time_ms": numberSchema("等待时长"),
-		"force": booleanSchema("强制终止"), "input": stringSchema("stdin 文本"), "confirmation_token": stringSchema("语义确认"), "purpose": stringSchema("目的"),
-	}, []string{"remote_session_id", "action", "task_id", "purpose"}, mutatingToolAnnotation), r.toolTask)
+		"force": booleanSchema("强制终止"), "input": stringSchema("stdin 文本"), "confirmation_token": stringSchema("语义确认"),
+	}, []string{"remote_session_id", "action", "task_id"}, mutatingToolAnnotation), r.toolTask)
 
 	r.addTool(s, publicTool("plan", toolDesc["plan"], map[string]any{
 		"remote_session_id": remoteSession, "action": enumSchema("计划动作", "create", "start_task", "complete_task", "block_task", "replan", "deliver"),
 		"goal": stringSchema("计划目标"), "summary": stringSchema("计划摘要"), "tasks": arraySchema(planTaskInputSchema(), "有序计划任务"),
 		"plan_id": stringSchema("Plan ID"), "task_id": stringSchema("计划任务 ID"), "evidence": arraySchema(planEvidenceSchema(), "证据"),
-		"reason": stringSchema("阻塞或重新规划原因"), "operations": arraySchema(planOperationSchema(), "计划任务操作"), "purpose": stringSchema("目的"),
-	}, []string{"remote_session_id", "action", "purpose"}, mutatingToolAnnotation), r.toolPlan)
+		"reason": stringSchema("阻塞或重新规划原因"), "operations": arraySchema(planOperationSchema(), "计划任务操作"),
+	}, []string{"remote_session_id", "action"}, mutatingToolAnnotation), r.toolPlan)
 	r.addTool(s, publicTool("plan_read", toolDesc["plan_read"], map[string]any{
 		"remote_session_id": remoteSession, "plan_id": stringSchema("Plan ID"),
 	}, []string{"remote_session_id", "plan_id"}, readOnlyToolAnnotation), r.toolPlanReadPublic)
@@ -516,12 +514,12 @@ func (r *Runtime) registerConsolidatedToolsV2(s *mcp.Server) {
 	}, []string{"kind", "view"}, readOnlyToolAnnotation), r.toolExtensionDiscover)
 	r.addTool(s, publicTool("skill_call", toolDesc["skill_call"], map[string]any{
 		"remote_session_id": remoteSession, "name": stringSchema("Skill 名称"),
-		"arguments": map[string]any{"type": "object", "additionalProperties": true}, "confirmation_token": stringSchema("语义确认"), "purpose": stringSchema("目的"),
-	}, []string{"remote_session_id", "name", "purpose"}, commandExecutionToolAnnotation), r.toolSkillCall)
+		"arguments": map[string]any{"type": "object", "additionalProperties": true}, "confirmation_token": stringSchema("语义确认"),
+	}, []string{"remote_session_id", "name"}, commandExecutionToolAnnotation), r.toolSkillCall)
 	r.addTool(s, publicTool("mcp_call", toolDesc["mcp_call"], map[string]any{
 		"remote_session_id": remoteSession, "server": stringSchema("MCP Server 名称"), "tool": stringSchema("上游工具名称"),
-		"arguments": map[string]any{"type": "object", "additionalProperties": true}, "confirmation_token": stringSchema("语义确认"), "purpose": stringSchema("目的"),
-	}, []string{"remote_session_id", "server", "tool", "purpose"}, commandExecutionToolAnnotation), r.toolMCPCallPublic)
+		"arguments": map[string]any{"type": "object", "additionalProperties": true}, "confirmation_token": stringSchema("语义确认"),
+	}, []string{"remote_session_id", "server", "tool"}, commandExecutionToolAnnotation), r.toolMCPCallPublic)
 
 	r.addTool(s, publicTool("artifact_read", toolDesc["artifact_read"], map[string]any{
 		"remote_session_id": remoteSession, "view": enumSchema("读取视图", "list", "content"), "kind": stringSchema("产物类型"),

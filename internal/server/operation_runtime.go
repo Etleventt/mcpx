@@ -78,7 +78,6 @@ func (r *Runtime) executeOperationStep(ctx context.Context, input operation.Exec
 	}
 	arguments := cloneArguments(input.Arguments)
 	arguments["session_id"] = input.RemoteSessionID
-	arguments["purpose"] = input.Purpose
 	arguments["execution_mode"] = "sync"
 	request := mcpresult.Request(arguments)
 	childCtx := r.operationChildContext(ctx, input)
@@ -111,7 +110,6 @@ func (r *Runtime) waitForOperationTask(ctx context.Context, input operation.Exec
 	data := r.taskResultData(task, 0, 0)
 	data["task_id"] = task.ID
 	data["command"] = task.Command
-	data["purpose"] = input.Purpose
 	data["completed_in_call"] = true
 	data["operation_waited"] = true
 	capTaskExecutionOutput(data, 256<<10)

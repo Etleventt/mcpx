@@ -139,6 +139,9 @@ func (r *Runtime) createRemoteSession(ctx context.Context, principal auth.Princi
 	label, _ := envReq.Payload["label"].(string)
 	description, _ := envReq.Payload["description"].(string)
 	approvalMode, _ := envReq.Payload["approval_mode"].(string)
+	if strings.TrimSpace(approvalMode) == "" {
+		approvalMode = config.DefaultApprovalMode(r.cfg.RemoteSessions)
+	}
 	clientRequestID, _ := envReq.Payload["client_request_id"].(string)
 	clientName, clientVersion := clientInfoFromContext(ctx)
 	gitHead, treeDigest := workspaceRevision(ctx, ws.Path)

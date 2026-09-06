@@ -8,6 +8,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"mcpx/internal/envelope"
 	"mcpx/internal/mcpresult"
 )
 
@@ -21,21 +22,19 @@ func TestRemoteRequestAllowsReadWithoutPurpose(t *testing.T) {
 	}
 }
 
-func TestMutatingRequestRejectsOversizedPurpose(t *testing.T) {
-	runtime := newWorkspaceRuntime(t, "demo")
-	request := mcpresult.Request(map[string]any{"purpose": strings.Repeat("x", 513), "workspace": "demo"})
-
-	_, _, _, failure := runtime.changeRequest(context.Background(), request, true)
-	if failure == nil {
-		t.Fatal("oversized purpose was accepted")
+func TestServerDerivesPurposeAndBoundsLegacyPurpose(t *testing.T) {
+	derived := inferSemanticPurpose("command_run", envelope.Request{Payload: map[string]any{"command": "echo ok"}})
+	if derived != "run command" {
+		t.Fatalf("derived purpose=%q", derived)
 	}
-	response := decodeToolResult(t, failure)
-	if errorCode(response) != "purpose_required" {
-		t.Fatalf("response=%+v", response)
+	legacy := strings.Repeat("x", 2048)
+	bounded := inferSemanticPurpose("command_run", envelope.Request{Intent: legacy, Payload: map[string]any{"command": "echo ok"}})
+	if bounded == "" || len(bounded) >= len(legacy) {
+		t.Fatalf("legacy purpose was not sanitized/bounded: bytes=%d", len(bounded))
 	}
 }
 
-func TestEveryRegisteredToolExposesSemanticPurpose(t *testing.T) {
+func TestEveryRegisteredToolOmitsNarrativeIntentFields(t *testing.T) {
 	runtime := newWorkspaceRuntime(t, "demo")
 	protocol := mcp.NewServer(&mcp.Implementation{Name: "mcpx-test", Version: "0.1.0"}, nil)
 	runtime.registerTools(protocol)
@@ -43,14 +42,15 @@ func TestEveryRegisteredToolExposesSemanticPurpose(t *testing.T) {
 		var schema struct {
 			Properties map[string]any `json:"properties"`
 		}
-		if len(mcpresult.ToolSchemaJSON(registered)) > 0 {
-			if err := json.Unmarshal(mcpresult.ToolSchemaJSON(registered), &schema); err != nil {
-				t.Errorf("tool %q schema: %v", name, err)
-				continue
+		if raw := mcpresult.ToolSchemaJSON(registered); len(raw) > 0 {
+			if err := json.Unmarshal(raw, &schema); err != nil {
+				t.Fatalf("tool %q schema: %v", name, err)
 			}
 		}
-		if schema.Properties["purpose"] == nil {
-			t.Errorf("tool %q does not expose purpose: %+v", name, schema.Properties)
+		for _, field := range []string{"purpose", "progress_summary"} {
+			if schema.Properties[field] != nil {
+				t.Errorf("tool %q exposes narrative field %q", name, field)
+			}
 		}
 	}
 }

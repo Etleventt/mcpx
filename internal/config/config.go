@@ -2,17 +2,18 @@ package config
 
 // Config is the Runtime YAML schema (global + project merge result).
 type Config struct {
-	Server     ServerConfig     `yaml:"server"`
-	Auth       AuthConfig       `yaml:"auth"`
-	Security   SecurityConfig   `yaml:"security"`
-	State      StateConfig      `yaml:"state"`
-	Workspaces []WorkspaceEntry `yaml:"workspaces"`
-	Terminal   TerminalConfig   `yaml:"terminal"`
-	FileWatch  FileWatchConfig  `yaml:"file_watch"`
-	Discovery  DiscoveryConfig  `yaml:"discovery"`
-	Logging    LoggingConfig    `yaml:"logging"`
-	Transport  TransportConfig  `yaml:"transport"`
-	Limits     LimitsConfig     `yaml:"limits"`
+	Server         ServerConfig         `yaml:"server"`
+	Auth           AuthConfig           `yaml:"auth"`
+	Security       SecurityConfig       `yaml:"security"`
+	State          StateConfig          `yaml:"state"`
+	Workspaces     []WorkspaceEntry     `yaml:"workspaces"`
+	Terminal       TerminalConfig       `yaml:"terminal"`
+	FileWatch      FileWatchConfig      `yaml:"file_watch"`
+	Discovery      DiscoveryConfig      `yaml:"discovery"`
+	Logging        LoggingConfig        `yaml:"logging"`
+	Transport      TransportConfig      `yaml:"transport"`
+	RemoteSessions RemoteSessionsConfig `yaml:"remote_sessions"`
+	Limits         LimitsConfig         `yaml:"limits"`
 	// Project-only fields merged into effective view:
 	Description string `yaml:"description,omitempty"`
 }
@@ -52,6 +53,12 @@ type OAuthConfig struct {
 
 type TransportConfig struct {
 	SessionIdleTTL string `yaml:"session_idle_ttl"` // Go duration, e.g. "1h"
+}
+
+// RemoteSessionsConfig contains process-wide defaults for newly created
+// durable Remote Sessions. Individual sessions may still explicitly override it.
+type RemoteSessionsConfig struct {
+	DefaultApprovalMode string `yaml:"default_approval_mode"`
 }
 
 type LimitsConfig struct {
@@ -185,8 +192,9 @@ func DefaultConfig() Config {
 			Token: "",
 			OAuth: OAuthConfig{TokenTTL: 86400},
 		},
-		Transport: TransportConfig{SessionIdleTTL: "24h"},
-		Limits:    LimitsConfig{MaxResultBytes: 256 << 10},
+		Transport:      TransportConfig{SessionIdleTTL: "24h"},
+		RemoteSessions: RemoteSessionsConfig{DefaultApprovalMode: "standard"},
+		Limits:         LimitsConfig{MaxResultBytes: 256 << 10},
 		State: StateConfig{Retention: RetentionConfig{
 			Enabled:             true,
 			Interval:            "24h",

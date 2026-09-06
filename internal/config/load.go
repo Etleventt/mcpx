@@ -77,6 +77,9 @@ func LoadGlobal(path string) (Config, error) {
 	if err := ValidateMCPDiscovery(overlay.Discovery.MCP); err != nil {
 		return base, fmt.Errorf("validate %s: %w", path, err)
 	}
+	if err := ValidateDefaultApprovalMode(overlay.RemoteSessions.DefaultApprovalMode); err != nil {
+		return base, fmt.Errorf("validate %s: %w", path, err)
+	}
 	merged := merge(base, overlay, true)
 	if err := ValidateRetention(merged.State.Retention); err != nil {
 		return base, fmt.Errorf("validate %s: %w", path, err)
@@ -103,6 +106,9 @@ func LoadProject(workspacePath string) (Config, error) {
 	}
 	if strings.TrimSpace(c.Discovery.MCP.ProjectConfig) != "" {
 		return Config{}, fmt.Errorf("validate %s: discovery.mcp.project_config is process-wide", path)
+	}
+	if strings.TrimSpace(c.RemoteSessions.DefaultApprovalMode) != "" {
+		return Config{}, fmt.Errorf("validate %s: remote_sessions.default_approval_mode is process-wide", path)
 	}
 	return c, nil
 }
@@ -167,6 +173,9 @@ func merge(global, project Config, mergeAuth bool) Config {
 	}
 	if project.Transport.SessionIdleTTL != "" {
 		out.Transport.SessionIdleTTL = project.Transport.SessionIdleTTL
+	}
+	if mergeAuth && project.RemoteSessions.DefaultApprovalMode != "" {
+		out.RemoteSessions.DefaultApprovalMode = strings.ToLower(strings.TrimSpace(project.RemoteSessions.DefaultApprovalMode))
 	}
 	if project.Limits.MaxResultBytes != 0 {
 		out.Limits.MaxResultBytes = project.Limits.MaxResultBytes

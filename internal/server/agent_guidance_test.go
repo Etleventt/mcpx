@@ -49,7 +49,7 @@ func TestAgentGuidanceUsesDedicatedRoutingWithoutBusinessArguments(t *testing.T)
 func TestAgentGuidanceRequiresUserVisibleResponseContract(t *testing.T) {
 	guidance := agentGuidance()
 	contract, ok := guidance["response_contract"].(map[string]any)
-	if !ok || contract["required"] != true {
+	if !ok || contract["required"] != false {
 		t.Fatalf("response contract = %+v", guidance["response_contract"])
 	}
 	for _, field := range []string{"before_tool_call", "after_tool_call", "final_response"} {
@@ -60,8 +60,8 @@ func TestAgentGuidanceRequiresUserVisibleResponseContract(t *testing.T) {
 	}
 	after, _ := contract["after_tool_call"].([]string)
 	joinedAfter := strings.Join(after, "\n")
-	if !strings.Contains(joinedAfter, "progress_summary") || !strings.Contains(joinedAfter, "下一步") {
-		t.Fatalf("after-tool progress contract is incomplete: %+v", after)
+	if strings.Contains(joinedAfter, "progress_summary") || !strings.Contains(joinedAfter, "不要逐次复述") {
+		t.Fatalf("after-tool lean contract is incomplete: %+v", after)
 	}
 	evidence, _ := contract["evidence_rule"].(string)
 	if !strings.Contains(evidence, "不得声称") || !strings.Contains(evidence, "工具结果") {
@@ -141,8 +141,8 @@ func TestAgentGuidanceIncludesChangePayloadCheatSheet(t *testing.T) {
 	if !strings.Contains(joined, "session（action=open） 成功后") || !strings.Contains(joined, "完整 session_id") {
 		t.Fatalf("rules must require showing the session ID to the user: %s", joined)
 	}
-	if !strings.Contains(joined, "一次提交完整参数") || !strings.Contains(joined, "最多新增 300 行") {
-		t.Fatalf("rules must carry call and chunked-write guidance: %s", joined)
+	if !strings.Contains(joined, "不要为每次工具调用额外生成 purpose、progress_summary") || !strings.Contains(joined, "最多新增 300 行") {
+		t.Fatalf("rules must carry lean-call and chunked-write guidance: %s", joined)
 	}
 	if !strings.Contains(joined, "完整 sha256") {
 		t.Fatalf("rules must carry file revision and non-Git guidance: %s", joined)
@@ -205,8 +205,8 @@ func TestChangeSchemasAreSelfDescribingAndFlat(t *testing.T) {
 	if !ok {
 		t.Fatal("missing properties")
 	}
-	if properties["session_id"] == nil || properties["purpose"] == nil || properties["user_confirmed"] != nil {
-		t.Fatalf("change semantic fields are invalid: %+v", properties)
+	if properties["session_id"] == nil || properties["purpose"] != nil || properties["progress_summary"] != nil || properties["user_confirmed"] != nil {
+		t.Fatalf("change lean fields are invalid: %+v", properties)
 	}
 	operations, ok := properties["operations"].(map[string]any)
 	if !ok {

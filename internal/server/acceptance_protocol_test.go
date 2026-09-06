@@ -271,13 +271,13 @@ func TestA01A02A03A07A10A13ViaMCPProtocol(t *testing.T) {
 		t.Fatalf("change exposes removed compatibility field user_confirmed: %s", schemaText)
 	}
 	commandSchema, _ := json.Marshal(byName["command_run"].InputSchema)
-	for _, required := range []string{"session_id", "purpose"} {
-		if !strings.Contains(string(commandSchema), `"`+required+`"`) {
-			t.Fatalf("command_run schema missing %q: %s", required, commandSchema)
-		}
+	if !strings.Contains(string(commandSchema), `"session_id"`) || !strings.Contains(string(commandSchema), "scope") {
+		t.Fatalf("command_run schema missing execution fields: %s", commandSchema)
 	}
-	if !strings.Contains(string(commandSchema), "scope") {
-		t.Fatalf("command_run schema missing scope: %s", commandSchema)
+	for _, removed := range []string{`"purpose"`, `"progress_summary"`} {
+		if strings.Contains(string(commandSchema), removed) {
+			t.Fatalf("command_run schema exposes lean-protocol field %s: %s", removed, commandSchema)
+		}
 	}
 	contextSchema, _ := json.Marshal(byName["source_read"].InputSchema)
 	for _, removed := range []string{"pattern", "max_files"} {
@@ -285,8 +285,8 @@ func TestA01A02A03A07A10A13ViaMCPProtocol(t *testing.T) {
 			t.Fatalf("source_read exposes removed compatibility field %q: %s", removed, contextSchema)
 		}
 	}
-	if !strings.Contains(string(contextSchema), `"purpose"`) {
-		t.Fatalf("source_read schema must expose purpose: %s", contextSchema)
+	if strings.Contains(string(contextSchema), `"purpose"`) || strings.Contains(string(contextSchema), `"progress_summary"`) {
+		t.Fatalf("source_read schema must stay lean: %s", contextSchema)
 	}
 	extensionSchema, _ := json.Marshal(byName["extension_discover"].InputSchema)
 	if !strings.Contains(string(extensionSchema), "view") || !strings.Contains(string(extensionSchema), "include_tools") || !strings.Contains(string(extensionSchema), "server") {
@@ -307,14 +307,6 @@ func TestA01A02A03A07A10A13ViaMCPProtocol(t *testing.T) {
 
 	rawCall := func(name string, args map[string]any) map[string]any {
 		t.Helper()
-		if _, exists := args["purpose"]; !exists {
-			withPurpose := make(map[string]any, len(args)+1)
-			for key, value := range args {
-				withPurpose[key] = value
-			}
-			withPurpose["purpose"] = "acceptance operation"
-			args = withPurpose
-		}
 		res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
@@ -375,15 +367,9 @@ func TestA01A02A03A07A10A13ViaMCPProtocol(t *testing.T) {
 			}
 		}
 		delete(args, "remote_session_id")
-		if _, exists := args["purpose"]; !exists {
-			if value, exists := args["intent"]; exists {
-				args["purpose"] = value
-			}
-		}
-		if _, exists := args["purpose"]; !exists {
-			args["purpose"] = "acceptance operation"
-		}
+		delete(args, "purpose")
 		delete(args, "intent")
+		delete(args, "progress_summary")
 		switch name {
 		case "file_read":
 			name, args["view"] = "source_read", "file"
@@ -457,7 +443,7 @@ func TestA01A02A03A07A10A13ViaMCPProtocol(t *testing.T) {
 				}
 				applyArgs := map[string]any{
 					"session_id": args["session_id"], "changeset_id": preparedData["changeset_id"],
-					"expected_digest": preparedData["digest"], "purpose": args["purpose"],
+					"expected_digest": preparedData["digest"],
 				}
 				if value, exists := args["format"]; exists {
 					applyArgs["format"] = value
@@ -491,7 +477,7 @@ func TestA01A02A03A07A10A13ViaMCPProtocol(t *testing.T) {
 	guidance, _ := openData["agent_guidance"].(map[string]any)
 	routing, _ := guidance["tool_routing"].(map[string]any)
 	responseContract, _ := guidance["response_contract"].(map[string]any)
-	if guidance["version"] != agentGuidanceVersion || !containsAnyString(routing["modify_files"], "change") || responseContract["required"] != true {
+	if guidance["version"] != agentGuidanceVersion || !containsAnyString(routing["modify_files"], "change") || responseContract["required"] != false {
 		t.Fatalf("session_open guidance missing or incomplete: %+v", guidance)
 	}
 	remoteSession, _ := openData["remote_session"].(map[string]any)
@@ -543,7 +529,7 @@ func TestA01A02A03A07A10A13ViaMCPProtocol(t *testing.T) {
 		return resp["status"] == "ok" || resp["status"] == "succeeded" || resp["ok"] == true
 	}
 	planCreated := call("plan_manage", map[string]any{
-		"action": "create", "remote_session_id": remoteID, "goal": "acceptance plan", "purpose": "acceptance plan create",
+		"action": "create", "remote_session_id": remoteID, "goal": "acceptance plan",
 		"tasks": []any{map[string]any{"task_id": "verify", "title": "Verify protocol"}},
 	})
 	planData, _ := planCreated["data"].(map[string]any)
@@ -559,18 +545,18 @@ func TestA01A02A03A07A10A13ViaMCPProtocol(t *testing.T) {
 	if !strings.HasPrefix(taskID, "pt_") {
 		t.Fatalf("plan_create must issue server task id: %+v", planData)
 	}
-	started := call("plan_manage", map[string]any{"action": "start_task", "remote_session_id": remoteID, "plan_id": planID, "task_id": taskID, "purpose": "start task"})
+	started := call("plan_manage", map[string]any{"action": "start_task", "remote_session_id": remoteID, "plan_id": planID, "task_id": taskID})
 	if !statusOK(started) || started["data"].(map[string]any)["task_id"] != taskID {
 		t.Fatalf("plan start = %+v", started)
 	}
 	completed := call("plan_manage", map[string]any{
-		"action": "complete_task", "remote_session_id": remoteID, "plan_id": planID, "task_id": taskID, "purpose": "complete task",
+		"action": "complete_task", "remote_session_id": remoteID, "plan_id": planID, "task_id": taskID,
 		"evidence": []any{map[string]any{"kind": "source", "reference_id": "demo.go"}},
 	})
 	if !statusOK(completed) || completed["data"].(map[string]any)["status"] != "completed" {
 		t.Fatalf("plan complete = %+v", completed)
 	}
-	delivered := call("plan_manage", map[string]any{"action": "deliver", "remote_session_id": remoteID, "plan_id": planID, "purpose": "deliver plan"})
+	delivered := call("plan_manage", map[string]any{"action": "deliver", "remote_session_id": remoteID, "plan_id": planID})
 	if !statusOK(delivered) {
 		t.Fatalf("plan deliver = %+v", delivered)
 	}
@@ -713,14 +699,14 @@ func TestA01A02A03A07A10A13ViaMCPProtocol(t *testing.T) {
 
 	// --- A08 command_execute / task_manage short and long command paths ---
 	short := call("command_execute", map[string]any{
-		"remote_session_id": remoteID, "command": "printf short-command", "purpose": "run the short command protocol check", "scope": "workspace",
+		"remote_session_id": remoteID, "command": "printf short-command", "scope": "workspace",
 	})
 	shortData, _ := short["data"].(map[string]any)
 	if shortData["completed_in_call"] != true || shortData["exit_code"] != float64(0) || shortData["task_id"] != "" {
 		t.Fatalf("short command should complete in one call: %+v", short)
 	}
 	long := call("command_execute", map[string]any{
-		"remote_session_id": remoteID, "command": "sleep 0.05", "purpose": "verify short wait task handoff", "scope": "workspace", "yield_time_ms": 1,
+		"remote_session_id": remoteID, "command": "sleep 0.05", "scope": "workspace", "yield_time_ms": 1,
 	})
 	longData, _ := long["data"].(map[string]any)
 	longTaskID, _ := longData["task_id"].(string)
@@ -735,7 +721,7 @@ func TestA01A02A03A07A10A13ViaMCPProtocol(t *testing.T) {
 		t.Fatalf("task attach must return stream-specific offsets: %+v", attached)
 	}
 	overTen := call("command_execute", map[string]any{
-		"remote_session_id": remoteID, "command": "sleep 11", "purpose": "verify default long-task handoff", "scope": "workspace",
+		"remote_session_id": remoteID, "command": "sleep 11", "scope": "workspace",
 	})
 	overTenData, _ := overTen["data"].(map[string]any)
 	overTenTaskID, _ := overTenData["task_id"].(string)

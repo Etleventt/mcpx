@@ -39,8 +39,8 @@ func TestReadOnlyToolAnnotationsAndSessionOpenDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	commandProperties := commandSchema["properties"].(map[string]any)
-	if commandProperties["session_id"] == nil || commandProperties["purpose"] == nil || commandProperties["scope"] == nil || commandProperties["user_confirmed"] != nil {
-		t.Fatalf("command_run schema must expose the public semantic fields: %+v", commandProperties)
+	if commandProperties["session_id"] == nil || commandProperties["scope"] == nil || commandProperties["purpose"] != nil || commandProperties["progress_summary"] != nil || commandProperties["user_confirmed"] != nil {
+		t.Fatalf("command_run schema must expose only execution fields: %+v", commandProperties)
 	}
 	var sessionSchema map[string]any
 	if err := json.Unmarshal(mcpresult.ToolSchemaJSON(tools["session"]), &sessionSchema); err != nil {

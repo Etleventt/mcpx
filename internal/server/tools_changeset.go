@@ -243,13 +243,6 @@ func (r *Runtime) changeRequest(ctx context.Context, req *mcp.CallToolRequest, e
 	if fail != nil {
 		return envReq, principal, remotesession.Session{}, fail
 	}
-	if edit {
-		if err := validatePurpose(envReq.Intent); err != nil {
-			response := envelope.Fail(envelope.StatusError, envReq.RequestID, envReq.Workspace, nil, "PURPOSE_REQUIRED", err.Error())
-			result, _ := r.resultJSON(response)
-			return envReq, principal, remotesession.Session{}, result
-		}
-	}
 	remoteSessionID, err := requireRemoteSessionID(envReq)
 	if err != nil {
 		result, _ := r.remoteError(envReq, "", "", err)

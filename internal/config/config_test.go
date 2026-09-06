@@ -23,6 +23,40 @@ func TestDefaultConfigUsesTransportSessionTTL(t *testing.T) {
 	}
 }
 
+func TestGlobalDefaultApprovalMode(t *testing.T) {
+	if got := DefaultApprovalMode(DefaultConfig().RemoteSessions); got != "standard" {
+		t.Fatalf("built-in default approval mode=%q", got)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("remote_sessions:\n  default_approval_mode: trusted\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadGlobal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := DefaultApprovalMode(cfg.RemoteSessions); got != "trusted" {
+		t.Fatalf("configured default approval mode=%q", got)
+	}
+	if err := os.WriteFile(path, []byte("remote_sessions:\n  default_approval_mode: nope\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadGlobal(path); err == nil {
+		t.Fatal("invalid global approval mode was accepted")
+	}
+}
+
+func TestProjectCannotOverrideDefaultApprovalMode(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".mcpx.yaml"), []byte("remote_sessions:\n  default_approval_mode: trusted\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadProject(dir); err == nil {
+		t.Fatal("project-level default approval mode was accepted")
+	}
+}
+
 func TestDefaultConfigUsesStateRetentionDefaults(t *testing.T) {
 	cfg := DefaultConfig()
 	retention := cfg.State.Retention

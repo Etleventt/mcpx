@@ -89,7 +89,6 @@ func (r *Runtime) toolCommandExecute(ctx context.Context, req *mcp.CallToolReque
 			confirmationData := commandConfirmationData{
 				ConfirmationToken:    pending.ConfirmationToken,
 				Command:              command,
-				Purpose:              purpose,
 				Scope:                scope,
 				CommandDigest:        commandDigest,
 				ConfirmationRequired: true,
@@ -115,7 +114,6 @@ func (r *Runtime) toolCommandExecute(ctx context.Context, req *mcp.CallToolReque
 type commandConfirmationData struct {
 	ConfirmationToken    string `json:"confirmation_token"`
 	Command              string `json:"command"`
-	Purpose              string `json:"purpose"`
 	Scope                string `json:"scope"`
 	CommandDigest        string `json:"command_digest"`
 	ConfirmationRequired bool   `json:"confirmation_required"`
@@ -136,7 +134,6 @@ func (r *Runtime) executeCommandTask(ctx context.Context, envReq envelope.Reques
 	completed := task.Wait(waitCtx)
 	cancel()
 	data := r.taskResultData(task, 0, 0)
-	data["purpose"] = purpose
 	data["scope"] = scope
 	data["command_digest"] = commandDigest
 	data["command"] = command
@@ -237,10 +234,10 @@ func commandIntent(req envelope.Request) (purpose, scope string, err error) {
 }
 
 func commandRequestDigest(requestID, remoteSessionID, workspace, command, purpose, scope string) string {
-	// Request IDs identify transport attempts. They must not change the
-	// semantic operation digest used to bind confirmation_token across retry.
-	_ = requestID
-	value := strings.Join([]string{remoteSessionID, workspace, command, purpose, scope}, "\x00")
+	// Transport IDs and human-readable purpose must not change the semantic
+	// operation digest used to bind confirmation_token across retry.
+	_, _ = requestID, purpose
+	value := strings.Join([]string{remoteSessionID, workspace, command, scope}, "\x00")
 	digest := sha256.Sum256([]byte(value))
 	return "sha256:" + hex.EncodeToString(digest[:])
 }

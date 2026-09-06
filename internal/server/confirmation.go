@@ -20,7 +20,6 @@ func pendingConfirmationItems(pending []approval.Pending) []map[string]any {
 		}
 		if item.Command != "" {
 			view["command"] = item.Command
-			view["purpose"] = item.Purpose
 			view["scope"] = item.Scope
 		}
 		items = append(items, view)

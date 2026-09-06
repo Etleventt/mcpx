@@ -754,6 +754,8 @@ func (r *Runtime) parseEnv(ctx context.Context, req *mcp.CallToolRequest) (envel
 		parsed.StepID = runtime.StepID
 		parsed.StartedAtMs = runtime.StartedAtMs
 	}
+	parsed.Intent = inferSemanticPurpose(toolInvocationName(ctx), parsed)
+	parsed.Purpose = parsed.Intent
 	return parsed, nil
 }
 

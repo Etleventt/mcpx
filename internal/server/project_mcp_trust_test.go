@@ -44,7 +44,7 @@ func TestProjectMCPRequiresConfirmationBeforeExecutableDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	baseArguments := map[string]any{"workspace": "demo", "remote_session_id": created.Session.ID, "kind": "mcp", "view": "list", "include_tools": false, "progress_summary": "inspect configured project MCP servers", "client_request_id": "project-mcp-list"}
+	baseArguments := map[string]any{"workspace": "demo", "remote_session_id": created.Session.ID, "kind": "mcp", "view": "list", "include_tools": false, "client_request_id": "project-mcp-list"}
 	listed, err := runtime.toolExtensionDiscover(context.Background(), mcpresult.Request(baseArguments))
 	if err != nil {
 		t.Fatal(err)
