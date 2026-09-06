@@ -447,7 +447,7 @@ var authorizePageTemplate = template.Must(template.New("authorize").Parse(`<!DOC
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>授权访问 MCPX</title>
+<title>授权访问 SubDesk</title>
 <style>
 :root{color-scheme:light;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f4f7fb;color:#172033}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;padding:32px 16px;display:grid;place-items:center;background:radial-gradient(circle at top,#e8f0ff 0,#f4f7fb 42%)}
@@ -462,7 +462,7 @@ footer{padding:0 32px 28px;color:#64748b;font-size:.85rem}@media(max-width:560px
 </head>
 <body>
 <main class="card">
-<header><h1>授权访问 MCPX</h1><p>请确认本次设备访问请求</p></header>
+<header><h1>授权访问 SubDesk</h1><p>请确认本次设备访问请求</p></header>
 <section class="content">
 <p class="request">客户端 <strong>{{.ClientName}}</strong> 正在请求访问此 Runtime。</p>
 <div class="details" aria-label="授权详情">
@@ -486,7 +486,7 @@ footer{padding:0 32px 28px;color:#64748b;font-size:.85rem}@media(max-width:560px
 <button type="submit">确认并授权</button>
 </form>
 </section>
-<footer>继续即表示你允许上述客户端按所列权限访问该资源。</footer>
+<footer>继续即表示你允许上述客户端按所列权限访问该资源。SubDesk 使用独立的 MCPX Runtime 执行本机授权。</footer>
 </main>
 </body>
 </html>
