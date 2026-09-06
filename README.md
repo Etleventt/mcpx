@@ -1,4 +1,14 @@
-# MCPX
+# SubDesk — 本地设备连接平台
+
+SubDesk 是基于 MCPX Runtime 的邀请制设备管理与远程开发产品。网站和桌面客户端使用 **SubDesk** 品牌；底层 MCP 协议、Runtime 可执行文件和已有配置目录保留原名，以兼容已有安装。
+
+普通用户从 [Releases](https://github.com/Etleventt/mcpx/releases) 下载明确标注 **SubDesk** 的系统对应内测包，按 [安装与配对指南](SUBDESK_INSTALL.md) 操作。收到平台地址和邀请码的用户不需要购买服务器。
+
+网站登录、设备配对、后台在线和工具执行授权是不同状态；只有设备在线并完成独立授权后，ChatGPT 才能操作设备。普通 HTTPS 中转不是端到端加密，平台技术上可见中转内容；请只用非敏感测试目录进行内测。
+
+本仓库是 [opentokenz/mcpx](https://github.com/opentokenz/mcpx) 的定制 fork，推荐分支为 `web-mac`。保留上游著作权与 Apache-2.0 许可证；下面是底层 Runtime 的开发文档。
+
+## MCPX Runtime
 
 MCPX 是运行在本地开发环境中的 MCP Runtime（网关）。它通过
 Streamable HTTP 把本地 Workspace、源码、变更、命令、任务、环境和扩展能力
@@ -54,7 +64,7 @@ MCPX 只提供 Streamable HTTP 的 `/mcp` 端点，不提供旧版 HTTP+SSE 的 
 ### 从源码构建
 
 ```bash
-git clone https://github.com/opentokenz/mcpx.git
+git clone --branch web-mac https://github.com/Etleventt/mcpx.git
 cd mcpx
 go build -o bin/mcpx-server ./cmd/mcpx-server
 ```
