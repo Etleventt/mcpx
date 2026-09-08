@@ -21,6 +21,8 @@ func main() {
 	// Subcommands (before flag.Parse so they own their flags).
 	if len(os.Args) >= 2 {
 		switch os.Args[1] {
+		case "access":
+			os.Exit(runAccess(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 		case "workspace":
 			os.Exit(runWorkspaceObserver(os.Args[2:]))
 		case "oauth-register":

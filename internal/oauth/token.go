@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"mcpx/internal/accesspolicy"
 )
 
 const (
@@ -21,12 +22,15 @@ const (
 
 // Server holds process-local OAuth state.
 type Server struct {
-	Password    string
-	ServerURL   string // configured origin; may be empty until request
-	TokenSecret []byte
-	TokenTTL    int // seconds
-	Registry    *Registry
-	CIMD        *CIMDResolver // Client ID Metadata Documents (ChatGPT / OpenAI)
+	Password         string
+	ServerURL        string // configured origin; may be empty until request
+	TokenSecret      []byte
+	TokenTTL         int // seconds
+	Registry         *Registry
+	CIMD             *CIMDResolver // Client ID Metadata Documents (ChatGPT / OpenAI)
+	Access           *accesspolicy.Store
+	passwordWindow   time.Time
+	passwordAttempts int
 
 	mu      sync.Mutex
 	codes   map[string]*authCode
@@ -34,6 +38,7 @@ type Server struct {
 }
 
 type authCode struct {
+	Grant               accesspolicy.Grant
 	ClientID            string
 	RedirectURI         string
 	CodeChallenge       string
@@ -45,6 +50,7 @@ type authCode struct {
 
 // refreshGrant is a long-lived opaque refresh token bound to a client.
 type refreshGrant struct {
+	Grant     accesspolicy.Grant
 	ClientID  string
 	Resource  string
 	Scope     string
@@ -166,6 +172,17 @@ func trimSlash(s string) string {
 
 // IssueCode creates a one-time authorization code after password approval.
 func (s *Server) IssueCode(clientID, redirectURI, challenge, method, resource, scope string) (string, error) {
+	grant, err := s.fixedGrant()
+	if err != nil {
+		return "", err
+	}
+	return s.issueCode(clientID, redirectURI, challenge, method, resource, scope, grant)
+}
+
+func (s *Server) issueCode(clientID, redirectURI, challenge, method, resource, scope string, grant accesspolicy.Grant) (string, error) {
+	if !s.validGrant(grant) {
+		return "", fmt.Errorf("invalid_grant")
+	}
 	if method != "" && method != "S256" {
 		return "", fmt.Errorf("only S256 PKCE is supported")
 	}
@@ -186,6 +203,7 @@ func (s *Server) IssueCode(clientID, redirectURI, challenge, method, resource, s
 	}
 	code := TokenURLSafe(32)
 	s.codes[code] = &authCode{
+		Grant:               grant,
 		ClientID:            clientID,
 		RedirectURI:         redirectURI,
 		CodeChallenge:       challenge,
@@ -213,7 +231,7 @@ func (s *Server) ExchangeCode(code, redirectURI, clientID, codeVerifier, resourc
 	if !ok {
 		return "", 0, fmt.Errorf("invalid_grant")
 	}
-	if time.Now().After(ac.ExpiresAt) {
+	if !time.Now().Before(ac.ExpiresAt) || !s.validGrant(ac.Grant) || (resource != "" && ac.Resource != "" && resource != ac.Resource) {
 		return "", 0, fmt.Errorf("invalid_grant")
 	}
 	if ac.ClientID != clientID || ac.RedirectURI != redirectURI {
@@ -236,15 +254,28 @@ func (s *Server) ExchangeCode(code, redirectURI, clientID, codeVerifier, resourc
 	if issuer == "" {
 		return "", 0, fmt.Errorf("cannot determine token issuer; set auth.oauth.server_url")
 	}
-	tok, err := s.CreateAccessToken(clientID, res, issuer)
-	if err != nil {
-		return "", 0, err
-	}
-	return tok, s.TokenTTL, nil
+	return s.createAccessToken(clientID, res, issuer, ac.Grant)
 }
 
 // IssueRefreshToken creates an opaque refresh token for the client/resource.
 func (s *Server) IssueRefreshToken(clientID, resource, scope string) string {
+	grant, err := s.fixedGrant()
+	if err != nil {
+		return ""
+	}
+	return s.issueRefresh(clientID, resource, scope, grant, time.Now().Add(RefreshTokenTTLSeconds*time.Second))
+}
+
+func (s *Server) issueRefresh(clientID, resource, scope string, grant accesspolicy.Grant, expiry time.Time) string {
+	if !s.validGrant(grant) {
+		return ""
+	}
+	if grant.Until > 0 && expiry.Unix() > grant.Until {
+		expiry = time.Unix(grant.Until, 0)
+	}
+	if !time.Now().Before(expiry) {
+		return ""
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pruneRefreshLocked()
@@ -269,10 +300,11 @@ func (s *Server) IssueRefreshToken(clientID, resource, scope string) string {
 		tok = TokenURLSafe(32)
 	}
 	s.refresh[tok] = &refreshGrant{
+		Grant:     grant,
 		ClientID:  clientID,
 		Resource:  resource,
 		Scope:     scope,
-		ExpiresAt: time.Now().Add(RefreshTokenTTLSeconds * time.Second),
+		ExpiresAt: expiry,
 	}
 	return tok
 }
@@ -285,7 +317,7 @@ func (s *Server) ExchangeRefreshToken(refreshToken, clientID, resource string) (
 		delete(s.refresh, refreshToken)
 	}
 	s.mu.Unlock()
-	if !ok || time.Now().After(g.ExpiresAt) {
+	if !ok || !time.Now().Before(g.ExpiresAt) || !s.validGrant(g.Grant) || (resource != "" && g.Resource != "" && resource != g.Resource) {
 		return "", 0, "", fmt.Errorf("invalid_grant")
 	}
 	if g.ClientID != clientID {
@@ -302,12 +334,15 @@ func (s *Server) ExchangeRefreshToken(refreshToken, clientID, resource string) (
 	if res == "" {
 		res = s.ResourceURL(issuer)
 	}
-	tok, err := s.CreateAccessToken(clientID, res, issuer)
+	tok, ttl, err := s.createAccessToken(clientID, res, issuer, g.Grant)
 	if err != nil {
 		return "", 0, "", err
 	}
-	next := s.IssueRefreshToken(clientID, res, g.Scope)
-	return tok, s.TokenTTL, next, nil
+	next := s.issueRefresh(clientID, res, g.Scope, g.Grant, g.ExpiresAt)
+	if next == "" {
+		return "", 0, "", fmt.Errorf("invalid_grant")
+	}
+	return tok, ttl, next, nil
 }
 
 func issuerFromResource(resource string) string {
@@ -320,8 +355,20 @@ func issuerFromResource(resource string) string {
 
 // CreateAccessToken issues HS256 JWT.
 func (s *Server) CreateAccessToken(clientID, audience, issuer string) (string, error) {
+	grant, err := s.fixedGrant()
+	if err != nil {
+		return "", err
+	}
+	tok, _, err := s.createAccessToken(clientID, audience, issuer, grant)
+	return tok, err
+}
+
+func (s *Server) createAccessToken(clientID, audience, issuer string, grant accesspolicy.Grant) (string, int, error) {
+	if !s.validGrant(grant) {
+		return "", 0, fmt.Errorf("invalid_grant")
+	}
 	if len(s.TokenSecret) == 0 {
-		return "", fmt.Errorf("token secret not configured")
+		return "", 0, fmt.Errorf("token secret not configured")
 	}
 	if issuer == "" {
 		issuer = s.EffectiveIssuer("")
@@ -330,17 +377,27 @@ func (s *Server) CreateAccessToken(clientID, audience, issuer string) (string, e
 		audience = s.ResourceURL(issuer)
 	}
 	now := time.Now()
+	expires := now.Add(time.Duration(s.TokenTTL) * time.Second).Unix()
+	if grant.Until > 0 && expires > grant.Until {
+		expires = grant.Until
+	}
+	ttl := int(expires - now.Unix())
+	if ttl <= 0 {
+		return "", 0, fmt.Errorf("invalid_grant")
+	}
 	claims := jwt.MapClaims{
-		"iss":       issuer,
-		"aud":       audience,
-		"sub":       clientID,
-		"client_id": clientID,
-		"iat":       now.Unix(),
-		"exp":       now.Add(time.Duration(s.TokenTTL) * time.Second).Unix(),
-		"scope":     DefaultScope,
+		"device_grant": grant,
+		"iss":          issuer,
+		"aud":          audience,
+		"sub":          clientID,
+		"client_id":    clientID,
+		"iat":          now.Unix(),
+		"exp":          expires,
+		"scope":        DefaultScope,
 	}
 	t := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return t.SignedString(s.TokenSecret)
+	tok, err := t.SignedString(s.TokenSecret)
+	return tok, ttl, err
 }
 
 // ValidateAccessToken checks JWT signature, exp, iss, aud, and live client.
@@ -365,6 +422,10 @@ func (s *Server) ValidateAccessTokenIdentity(token, issuer, audience string) (st
 	}
 	claims, ok := parsed.Claims.(jwt.MapClaims)
 	if !ok {
+		return "", false
+	}
+	grant, grantErr := claimGrant(claims)
+	if grantErr != nil || !s.validGrant(grant) {
 		return "", false
 	}
 	cid, _ := claims["client_id"].(string)

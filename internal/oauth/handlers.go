@@ -3,9 +3,11 @@ package oauth
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
+	"mcpx/internal/accesspolicy"
 	"net/http"
 	"net/url"
 	"strings"
@@ -83,6 +85,9 @@ func (h *Handler) HandleAuthorizationServerMetadata(w http.ResponseWriter, r *ht
 		"registration_endpoint_auth_methods_supported": []string{"none"},
 		// OpenAI ChatGPT / MCP clients prefer CIMD when advertised (client_id is an HTTPS URL).
 		"client_id_metadata_document_supported": true,
+	}
+	if h.S.Access != nil {
+		body["subdesk_access_policy"] = 1
 	}
 	writeJSON(w, http.StatusOK, body)
 }
@@ -229,30 +234,18 @@ func (h *Handler) authorizePost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	passwordOK := h.S.CheckPassword(password)
-	if !passwordOK {
-		logging.L().Info("oauth authorize",
-			"component", "oauth", "method", "POST", "client_id", clientID,
-			"redirect_host", redirectHost(redirectURI), "has_state", state != "",
-			"state_len", len(state), "password_ok", false)
-		http.Error(w, "invalid password", http.StatusUnauthorized)
-		return
-	}
-	logging.L().Info("oauth authorize",
-		"component", "oauth", "method", "POST", "client_id", clientID,
-		"redirect_host", redirectHost(redirectURI), "has_state", state != "",
-		"state_len", len(state), "password_ok", true)
 	if resource == "" {
 		origin := h.S.EffectiveIssuer(OriginFromRequest(r, false))
 		resource = h.S.ResourceURL(origin)
 	}
-	code, err := h.S.IssueCode(clientID, redirectURI, challenge, method, resource, scope)
+	code, err := h.S.AuthorizeCredential(password, clientID, redirectURI, challenge, method, resource, scope)
 	if err != nil {
-		logging.L().Info("oauth authorize",
-			"component", "oauth", "method", "POST", "client_id", clientID,
-			"redirect_host", redirectHost(redirectURI), "has_state", state != "",
-			"state_len", len(state), "error", err.Error())
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		status := http.StatusUnauthorized
+		if errors.Is(err, accesspolicy.ErrLimited) {
+			status = http.StatusTooManyRequests
+			w.Header().Set("Retry-After", "60")
+		}
+		http.Error(w, "设备访问口令无效、已过期或暂时不可用，请在本机检查后重试。", status)
 		return
 	}
 	u, err := url.Parse(redirectURI)
@@ -303,7 +296,12 @@ func (h *Handler) HandleToken(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	_ = r.ParseForm()
+	w.Header().Set("Cache-Control", "no-store")
+	r.Body = http.MaxBytesReader(w, r.Body, maxOAuthBody)
+	if err := r.ParseForm(); err != nil {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "bad form")
+		return
+	}
 	grant := r.FormValue("grant_type")
 	if grant != "authorization_code" && grant != "refresh_token" {
 		logging.L().Info("oauth token",
@@ -376,11 +374,11 @@ func (h *Handler) HandleToken(w http.ResponseWriter, r *http.Request) {
 	logging.L().Info("oauth token",
 		"component", "oauth", "client_id", clientID,
 		"auth_method", authMethod, "ok", true)
-	res := resource
-	if res == "" {
-		res = h.S.ResourceURL(h.S.EffectiveIssuer(OriginFromRequest(r, false)))
+	refreshToken, err := h.S.RefreshForAccessToken(tok, DefaultScope)
+	if err != nil {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "device authorization expired or revoked")
+		return
 	}
-	refreshToken := h.S.IssueRefreshToken(clientID, res, DefaultScope)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"access_token":  tok,
 		"token_type":    "Bearer",
@@ -473,9 +471,9 @@ footer{padding:0 32px 28px;color:#64748b;font-size:.85rem}@media(max-width:560px
 </div>
 <div class="notice"><strong>仅输入设备访问口令</strong>不要输入平台登录密码，也不要输入 Device Token。普通 HTTPS 中转并非端到端加密，中转服务可能接触提交内容；请只在你信任的设备入口继续。</div>
 <form method="POST" action="{{.FormAction}}">
-<label for="password">设备访问口令</label>
+<label for="password">固定访问密码或临时访问码</label>
 <input id="password" name="password" type="password" required autocomplete="current-password"/>
-<p class="hint">这是该设备单独配置的访问口令，不是你的平台账号密码或令牌。</p>
+<p class="hint">请使用目标电脑客户端中设置的固定密码或临时码。临时码只能授权一次，访问在生成后十分钟内有效；刷新或撤销临时码会使原临时授权失效。不要输入平台账号密码或令牌。</p>
 <input type="hidden" name="client_id" value="{{.ClientID}}"/>
 <input type="hidden" name="redirect_uri" value="{{.RedirectURI}}"/>
 <input type="hidden" name="code_challenge" value="{{.CodeChallenge}}"/>

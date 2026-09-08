@@ -17,6 +17,7 @@ import (
 
 	"mcpx/internal/mcpresult"
 
+	"mcpx/internal/accesspolicy"
 	"mcpx/internal/approval"
 	"mcpx/internal/artifact"
 	"mcpx/internal/audit"
@@ -346,6 +347,7 @@ func buildOAuthServer(cfg *config.Config) (*oauth.Server, error) {
 		}
 	}
 	srv := oauth.NewServer(password, strings.TrimSpace(cfg.Auth.OAuth.ServerURL), secret, config.OAuthTokenTTL(cfg.Auth.OAuth))
+	srv.Access = &accesspolicy.Store{Home: home, LegacyPassword: password}
 	// Persist DCR clients so restart does not break ChatGPT "reconnect".
 	persist := filepath.Join(home, "oauth-clients.json")
 	if err := srv.Registry.SetPersistPath(persist); err != nil {
