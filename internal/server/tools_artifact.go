@@ -84,6 +84,11 @@ func (r *Runtime) toolArtifactRead(ctx context.Context, req *mcp.CallToolRequest
 }
 
 func (r *Runtime) resourceArtifact(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	done, scopeErr := r.beginScopeResource()
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	defer done()
 	remoteSessionID, artifactID, err := parseArtifactURI(req.Params.URI)
 	if err != nil {
 		return nil, err

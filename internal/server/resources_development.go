@@ -10,6 +10,11 @@ import (
 )
 
 func (r *Runtime) resourceChangesetDiff(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	done, scopeErr := r.beginScopeResource()
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	defer done()
 	remoteSessionID, changesetID, err := parseDevelopmentResourceURI(req.Params.URI, "changesets", "diff")
 	if err != nil {
 		return nil, err
@@ -32,6 +37,11 @@ func (r *Runtime) resourceChangesetDiff(ctx context.Context, req *mcp.ReadResour
 }
 
 func (r *Runtime) resourceTaskLogs(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	done, scopeErr := r.beginScopeResource()
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	defer done()
 	remoteSessionID, taskID, err := parseDevelopmentResourceURI(req.Params.URI, "tasks", "logs")
 	if err != nil {
 		return nil, err

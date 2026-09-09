@@ -20,7 +20,7 @@ func (r *Runtime) addTool(s *mcp.Server, tool mcp.Tool, handler mcp.ToolHandler)
 	// inflates tools/list past what ChatGPT Connector discovery accepts
 	// (invalid_response / "discover response was inconsistent"). Runtime still
 	// returns structuredContent via arc.WrapToolResult.
-	instrumented := r.instrumentTool(tool.Name, handler)
+	instrumented := r.guardFileScope(tool.Name, r.instrumentTool(tool.Name, handler))
 	if r.toolHandlers == nil {
 		r.toolHandlers = map[string]mcp.ToolHandler{}
 	}

@@ -26,6 +26,7 @@ import (
 	"mcpx/internal/config"
 	"mcpx/internal/envelope"
 	"mcpx/internal/environment"
+	"mcpx/internal/filescope"
 	"mcpx/internal/filesnapshot"
 	"mcpx/internal/logging"
 	"mcpx/internal/oauth"
@@ -54,6 +55,9 @@ type Options struct {
 
 // Runtime is the MCPX process root.
 type Runtime struct {
+	fileScopeMu     sync.Mutex
+	fileScopeEdit   sync.Mutex
+	fileScopeActive int
 	opts            Options
 	cfg             config.Config
 	reg             *workspace.Registry
@@ -201,9 +205,20 @@ func New(opts Options) (*Runtime, error) {
 		return nil, fmt.Errorf("initialize terminal tasks: %w", err)
 	}
 	changesetService := changeset.NewService(stateStore.DB())
-	if err := changesetService.Recover(context.Background()); err != nil {
+	scopeHome := home
+	if resolved, e := filepath.EvalSymlinks(home); e == nil {
+		scopeHome = resolved
+	}
+	startupScope, scopeErr := (filescope.Store{Home: scopeHome}).Load()
+	if scopeErr != nil {
 		_ = stateStore.Close()
-		return nil, fmt.Errorf("recover changesets: %w", err)
+		return nil, fmt.Errorf("filesystem scope invalid: %w", scopeErr)
+	}
+	if startupScope.Mode == filescope.Full {
+		if err := changesetService.Recover(context.Background()); err != nil {
+			_ = stateStore.Close()
+			return nil, fmt.Errorf("recover changesets: %w", err)
+		}
 	}
 	retentionService, err := state.NewRetentionService(stateStore.DB(), taskLogDir, cfg.State.Retention)
 	if err != nil {
@@ -404,6 +419,11 @@ func (r *Runtime) Start() error {
 		SessionTimeout:             config.TransportSessionIdleTTL(r.cfg.Transport),
 		Stateless:                  true,
 	})
+	if filescope.Available() {
+		if _, err := r.fileScopeStore().Ensure(); err != nil {
+			return fmt.Errorf("initialize local filesystem scope control: %w", err)
+		}
+	}
 	gw := NewGateway(r.cfg, r.oauth, streamable)
 
 	log := logging.With("component", "server")
@@ -437,7 +457,7 @@ func (r *Runtime) Start() error {
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           gw.Handler(),
+		Handler:           r.fileScopeHTTP(gw.Handler()),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	return srv.ListenAndServe()
