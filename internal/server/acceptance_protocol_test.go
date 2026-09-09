@@ -216,7 +216,7 @@ func TestA01A02A03A07A10A13ViaMCPProtocol(t *testing.T) {
 	expectedTools := []string{
 		"workspace_read", "session", "session_read",
 		"operation_batch", "operation_manage",
-		"source_read", "change", "change_read", "command_run", "task_read", "task",
+		"source_read", "file_receive", "change", "change_read", "command_run", "task_read", "task",
 		"plan", "plan_read", "runtime_read", "environment_read", "environment",
 		"extension_discover", "skill_call", "mcp_call", "artifact_read", "artifact", "screenshot_capture", "secret_provide",
 	}

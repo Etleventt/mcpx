@@ -28,6 +28,7 @@ var toolCapabilityDefinitions = []toolCapabilityDefinition{
 	{Name: "session", Domain: "session"},
 	{Name: "session_read", Domain: "session"},
 	{Name: "source_read", Domain: "source", RequiresRemoteSession: true},
+	{Name: "file_receive", Domain: "source", RequiresRemoteSession: true, Roles: []string{"owner", "editor"}},
 	{Name: "change", Domain: "change", RequiresRemoteSession: true, Roles: []string{"owner", "editor"}},
 	{Name: "change_read", Domain: "change", RequiresRemoteSession: true},
 	{Name: "command_run", Domain: "command", RequiresRemoteSession: true, Roles: []string{"owner", "editor"}, Feature: "terminal"},

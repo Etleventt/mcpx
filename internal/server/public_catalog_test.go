@@ -19,7 +19,7 @@ func TestPublicCatalogIsExactlyTheV2Contract(t *testing.T) {
 	want := []string{
 		"workspace_read", "session", "session_read",
 		"operation_batch", "operation_manage",
-		"source_read", "change", "change_read", "command_run", "task_read", "task",
+		"source_read", "file_receive", "change", "change_read", "command_run", "task_read", "task",
 		"plan", "plan_read", "runtime_read", "environment_read", "environment",
 		"extension_discover", "skill_call", "mcp_call", "artifact_read", "artifact", "screenshot_capture", "secret_provide",
 	}
@@ -56,6 +56,21 @@ func TestPublicCatalogIsExactlyTheV2Contract(t *testing.T) {
 			}
 		}
 	}
+	fileReceive := runtime.listedToolMap()["file_receive"]
+	if values, ok := fileReceive.Meta["openai/fileParams"].([]string); !ok || !reflect.DeepEqual(values, []string{"file"}) {
+		t.Fatalf("file_receive fileParams=%T %+v", fileReceive.Meta["openai/fileParams"], fileReceive.Meta["openai/fileParams"])
+	}
+	var fileSchema map[string]any
+	if err := json.Unmarshal(mcpresult.ToolSchemaJSON(fileReceive), &fileSchema); err != nil {
+		t.Fatal(err)
+	}
+	fileProperties := fileSchema["properties"].(map[string]any)["file"].(map[string]any)["properties"].(map[string]any)
+	for _, name := range []string{"download_url", "file_id", "mime_type", "file_name"} {
+		if fileProperties[name] == nil {
+			t.Fatalf("file_receive missing OpenAI file property %s", name)
+		}
+	}
+
 	changeApply := runtime.listedToolMap()["change"]
 	var changeSchema map[string]any
 	if err := json.Unmarshal(mcpresult.ToolSchemaJSON(changeApply), &changeSchema); err != nil {

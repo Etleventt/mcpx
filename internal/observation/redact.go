@@ -10,7 +10,7 @@ import (
 const redactedValue = "[REDACTED]"
 
 var sensitiveKeyParts = []string{
-	"token", "secret", "password", "authorization", "cookie", "api_key", "apikey", "private_key", "client_secret",
+	"token", "secret", "password", "authorization", "cookie", "api_key", "apikey", "private_key", "client_secret", "download_url",
 }
 
 var sensitiveTextPattern = regexp.MustCompile(`(?i)(\b(?:authorization|proxy-authorization)\b\s*:\s*bearer\s+|\bbearer\s+|["']?\b(?:token|secret|password|authorization|cookie|api[_-]?key|private[_-]?key|client[_-]?secret)\b["']?\s*[:=]\s*)(["']?)[^"'\s,;}]+`)

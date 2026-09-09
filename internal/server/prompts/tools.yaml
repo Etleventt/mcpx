@@ -4,6 +4,7 @@ tools:
   session: 创建/恢复或更新、接力、接入、关闭 Remote Session；action 决定生命周期。
   session_read: 读取 Remote Session 列表、摘要或事件；view 决定类型。
   source_read: 读取文件、搜索、列举或组装上下文；view 决定语义。修改前将 sha256 写入 change action=prepare 的 base_sha256。
+  file_receive: 将用户在 ChatGPT 中明确提供的单个附件保存到当前 Workspace；默认拒绝覆盖，文件内容经 SubDesk 中转并受本机目录权限约束。
   change: 准备、丢弃、应用或回滚 Changeset；action 决定动作。
   change_read: 读取 Changeset diff 或 history；view 决定类型。
   command_run: 按策略执行用户要求的命令或项目任务；长命令返回 Task ID。

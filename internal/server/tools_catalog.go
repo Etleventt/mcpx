@@ -138,6 +138,7 @@ var (
 	// decided by the server-side command policy, not by the tool itself, so
 	// hosts must not gate the call on the destructive hint.
 	commandExecutionToolAnnotation = toolAnnotation{ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true}
+	fileTransferToolAnnotation     = toolAnnotation{ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true}
 )
 
 func annotatedTool(tool mcp.Tool, annotation toolAnnotation) mcp.Tool {
@@ -447,6 +448,22 @@ func (r *Runtime) registerConsolidatedToolsV2(s *mcp.Server) {
 		"regex": booleanSchema("按 RE2 正则解释"), "case_sensitive": booleanSchema("区分大小写"), "include_sha256": booleanSchema("list/search 是否附带 sha256"),
 		"include_instructions": booleanSchema("返回适用指令"), "context_before": numberSchema("匹配前上下文行数"), "context_after": numberSchema("匹配后上下文行数"),
 	}, []string{"remote_session_id", "view"}, readOnlyToolAnnotation), r.toolSourceRead)
+
+	fileInput := map[string]any{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]any{
+			"download_url": stringSchema("ChatGPT 提供的临时下载地址"),
+			"file_id":      stringSchema("ChatGPT 文件 ID"),
+			"mime_type":    stringSchema("可选 MIME 类型"),
+			"file_name":    stringSchema("可选原始文件名"),
+		},
+		"required": []string{"download_url", "file_id"},
+	}
+	fileReceive := publicTool("file_receive", toolDesc["file_receive"], map[string]any{
+		"remote_session_id": remoteSession, "file": fileInput, "path": path,
+	}, []string{"remote_session_id", "file", "path"}, fileTransferToolAnnotation)
+	fileReceive.Meta = mcp.Meta{"openai/fileParams": []string{"file"}}
+	r.addTool(s, fileReceive, r.toolFileReceive)
 
 	r.addTool(s, publicTool("change", toolDesc["change"], map[string]any{
 		"remote_session_id":  remoteSession,

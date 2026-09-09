@@ -9,9 +9,10 @@ import (
 
 func TestSanitizeRedactsSensitiveKeysAndBoundsText(t *testing.T) {
 	value := map[string]any{
-		"token":  "secret-value",
-		"nested": map[string]any{"password": "password-value"},
-		"safe":   "visible",
+		"token":        "secret-value",
+		"download_url": "https://files.example.test/private?sig=temporary-secret",
+		"nested":       map[string]any{"password": "password-value"},
+		"safe":         "visible",
 	}
 	clean, truncated := Sanitize(value, 256)
 	if truncated {
@@ -21,7 +22,7 @@ func TestSanitizeRedactsSensitiveKeysAndBoundsText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(encoded), "secret-value") || strings.Contains(string(encoded), "password-value") {
+	if strings.Contains(string(encoded), "secret-value") || strings.Contains(string(encoded), "password-value") || strings.Contains(string(encoded), "files.example.test") {
 		t.Fatalf("sensitive values leaked: %s", encoded)
 	}
 	if !strings.Contains(string(encoded), "visible") {
