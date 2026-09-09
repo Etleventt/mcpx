@@ -73,6 +73,7 @@ type Runtime struct {
 	changesets      *changeset.Service
 	workspaceDiff   *workspacechanges.Service
 	fileSnapshots   *filesnapshot.Store
+	fileExports     *runtimeFileExportStore
 	artifacts       *artifact.Service
 	plans           *plan.Service
 	retention       *state.RetentionService
@@ -242,6 +243,7 @@ func New(opts Options) (*Runtime, error) {
 		changesets:            changesetService,
 		workspaceDiff:         workspacechanges.NewService(stateStore.DB()),
 		fileSnapshots:         filesnapshot.NewStore(stateStore.DB()),
+		fileExports:           newRuntimeFileExportStore(),
 		artifacts:             artifact.NewService(stateStore.DB()),
 		plans:                 plan.NewService(stateStore.DB()),
 		retention:             retentionService,
@@ -457,7 +459,7 @@ func (r *Runtime) Start() error {
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           r.fileScopeHTTP(gw.Handler()),
+		Handler:           r.fileScopeHTTP(r.fileTransferHTTP(gw.Handler())),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	return srv.ListenAndServe()
@@ -470,6 +472,9 @@ func (r *Runtime) Close() error {
 	}
 	r.closeOnce.Do(func() {
 		r.stopRetention()
+		if r.fileExports != nil {
+			r.fileExports.close()
+		}
 		if r.observation != nil && r.observation.async != nil {
 			r.observation.async.Close(2 * time.Second)
 		}

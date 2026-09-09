@@ -42,11 +42,14 @@ func (r *Runtime) guardFileScope(name string, next mcp.ToolHandler) mcp.ToolHand
 		if name == "file_receive" {
 			return r.toolFileReceiveRestricted(ctx, req, p)
 		}
+		if name == "file_send" {
+			return r.toolFileSendRestricted(ctx, req, p)
+		}
 		return r.restrictedTool(ctx, req, name, p)
 	}
 }
 func restrictedSessionData(s remotesession.Session) map[string]any {
-	return map[string]any{"session_id": s.ID, "workspace": s.WorkspaceName, "status": s.Status, "mode": "folders", "file_only": true, "allowed_tools": []string{"session", "session_read", "workspace_read", "source_read", "file_receive", "change"}, "notice": "仅允许指定目录的文件读取、搜索和单文件编辑；终端、外部代理、MCP扩展和旧活动记录不可用。"}
+	return map[string]any{"session_id": s.ID, "workspace": s.WorkspaceName, "status": s.Status, "mode": "folders", "file_only": true, "allowed_tools": []string{"session", "session_read", "workspace_read", "source_read", "file_receive", "file_send", "change"}, "notice": "仅允许指定目录的文件读取、搜索和单文件编辑；终端、外部代理、MCP扩展和旧活动记录不可用。"}
 }
 func (r *Runtime) restrictedTool(ctx context.Context, req *mcp.CallToolRequest, name string, p filescope.Policy) (*mcp.CallToolResult, error) {
 	env, principal, fail := r.remoteRequest(ctx, req)

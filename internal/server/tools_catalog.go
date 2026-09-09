@@ -465,6 +465,10 @@ func (r *Runtime) registerConsolidatedToolsV2(s *mcp.Server) {
 	fileReceive.Meta = mcp.Meta{"openai/fileParams": []string{"file"}}
 	r.addTool(s, fileReceive, r.toolFileReceive)
 
+	r.addTool(s, publicTool("file_send", toolDesc["file_send"], map[string]any{
+		"remote_session_id": remoteSession, "path": path,
+	}, []string{"remote_session_id", "path"}, fileTransferToolAnnotation), r.toolFileSend)
+
 	r.addTool(s, publicTool("change", toolDesc["change"], map[string]any{
 		"remote_session_id":  remoteSession,
 		"action":             enumSchema("变更动作", "prepare", "discard", "apply", "revert"),
