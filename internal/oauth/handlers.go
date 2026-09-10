@@ -87,7 +87,8 @@ func (h *Handler) HandleAuthorizationServerMetadata(w http.ResponseWriter, r *ht
 		"client_id_metadata_document_supported": true,
 	}
 	if h.S.Access != nil {
-		body["subdesk_access_policy"] = 1
+		body["subdesk_access_policy"] = 2
+		body["subdesk_mcp_token_headers"] = []string{"Authorization: Bearer", "X-API-Key"}
 	}
 	writeJSON(w, http.StatusOK, body)
 }

@@ -28,6 +28,7 @@ type Grant struct {
 type Status struct {
 	Enabled            bool       `json:"enabled"`
 	FixedPasswordSet   bool       `json:"fixed_password_set"`
+	MCPTokenSet        bool       `json:"mcp_token_set"`
 	TemporaryActive    bool       `json:"temporary_active"`
 	TemporaryExpiresAt *time.Time `json:"temporary_expires_at,omitempty"`
 }
@@ -43,6 +44,7 @@ type policy struct {
 	Salt                string `json:"salt"`
 	FixedHash           string `json:"fixed_hash"`
 	FixedGeneration     string `json:"fixed_generation"`
+	MCPTokenHash        string `json:"mcp_token_hash,omitempty"`
 	TemporaryHash       string `json:"temporary_hash"`
 	TemporaryGeneration string `json:"temporary_generation"`
 	TemporaryUntil      int64  `json:"temporary_until"`
@@ -94,7 +96,7 @@ func (s *Store) status(p *policy) Status {
 	if p == nil {
 		return Status{FixedPasswordSet: s.LegacyPassword != ""}
 	}
-	out := Status{Enabled: true, FixedPasswordSet: p.FixedHash != ""}
+	out := Status{Enabled: true, FixedPasswordSet: p.FixedHash != "", MCPTokenSet: p.MCPTokenHash != ""}
 	if p.TemporaryUntil > 0 {
 		until := time.Unix(p.TemporaryUntil, 0).UTC()
 		out.TemporaryExpiresAt = &until
@@ -185,6 +187,50 @@ func (s *Store) GenerateFixed() (Status, string, error) {
 		return Status{}, "", err
 	}
 	return out, password, nil
+}
+
+func (s *Store) GenerateMCPToken() (Status, string, error) {
+	raw, err := secret(32)
+	if err != nil {
+		return Status{}, "", err
+	}
+	token := "sdt_" + strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw))
+	var out Status
+	err = s.withPolicy(true, func(p *policy) (bool, error) {
+		p.MCPTokenHash = digest(token)
+		out = s.status(p)
+		return true, nil
+	})
+	if err != nil {
+		return Status{}, "", err
+	}
+	return out, token, nil
+}
+
+func (s *Store) RevokeMCPToken() (Status, error) {
+	var out Status
+	err := s.withPolicy(false, func(p *policy) (bool, error) {
+		if p == nil {
+			out = s.status(p)
+			return false, nil
+		}
+		p.MCPTokenHash = ""
+		out = s.status(p)
+		return true, nil
+	})
+	return out, err
+}
+
+func (s *Store) VerifyMCPToken(value string) bool {
+	if !strings.HasPrefix(value, "sdt_") || len(value) < 40 || len(value) > 128 || strings.ContainsAny(value, "\r\n") {
+		return false
+	}
+	valid := false
+	err := s.withPolicy(false, func(p *policy) (bool, error) {
+		valid = p != nil && p.MCPTokenHash != "" && hmac.Equal([]byte(p.MCPTokenHash), []byte(digest(value)))
+		return false, nil
+	})
+	return err == nil && valid
 }
 
 // Verify atomically consumes a temporary code before issuing its OAuth grant.

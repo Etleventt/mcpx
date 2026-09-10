@@ -44,11 +44,12 @@ func (m *Manager) List() []map[string]any {
 	out := make([]map[string]any, 0, len(names))
 	for _, name := range names {
 		srv := m.servers[name]
-		typeName := srv.Type
+		remoteType, typeErr := remoteTransportType(srv)
+		typeName := remoteType
 		if typeName == "" {
 			typeName = "stdio"
 		}
-		out = append(out, map[string]any{
+		item := map[string]any{
 			"name": name, "type": typeName, "state": "configured",
 			"source": "merged_config",
 			"invocation": map[string]any{
@@ -58,7 +59,16 @@ func (m *Manager) List() []map[string]any {
 			"tool_discovery": map[string]any{
 				"tool": "mcp_list", "arguments": map[string]any{"server": name, "include_tools": true},
 			},
-		})
+		}
+		if remoteType != "" {
+			item["endpoint"] = DescribeTarget(srv)
+			item["authentication"] = AuthenticationDescriptor(srv)
+		}
+		if typeErr != nil {
+			item["state"] = "invalid_config"
+			item["config_error"] = typeErr.Error()
+		}
+		out = append(out, item)
 	}
 	return out
 }
@@ -72,17 +82,27 @@ func ExpandEnv(env map[string]string) []string {
 	return out
 }
 
-// PingCommand checks the upstream binary is invokable (not full MCP handshake).
+// PingCommand validates that the configured upstream target is invokable. It
+// intentionally does not perform a network handshake; tool discovery does that.
 func (m *Manager) PingCommand(ctx context.Context, name string) error {
+	_ = ctx
 	srv, ok := m.servers[name]
 	if !ok {
 		return fmt.Errorf("server %q not configured", name)
+	}
+	remoteType, err := remoteTransportType(srv)
+	if err != nil {
+		return err
+	}
+	if remoteType != "" {
+		_, err = buildRemoteRequestConfig(srv)
+		return err
 	}
 	if srv.Command == "" {
 		return fmt.Errorf("empty command")
 	}
 	// best-effort: resolve look path
-	_, err := exec.LookPath(srv.Command)
+	_, err = exec.LookPath(srv.Command)
 	if err != nil {
 		// npx may still work via path later
 		logging.Debug("mcp lookpath", "server", name, "err", err)

@@ -110,7 +110,7 @@ func readPolicy(path string) (*policy, error) {
 		return nil, ErrState
 	}
 	var extra any
-	if d.Decode(&extra) != io.EOF || p.Version != 1 || !validHex(p.Salt, 16) || !validHex(p.FixedHash, 32) || (p.FixedGeneration != "" && !validHex(p.FixedGeneration, 16)) || p.Attempts < 0 || p.Attempts > 10 || p.Window < 0 {
+	if d.Decode(&extra) != io.EOF || p.Version != 1 || !validHex(p.Salt, 16) || !validHex(p.FixedHash, 32) || (p.FixedGeneration != "" && !validHex(p.FixedGeneration, 16)) || (p.MCPTokenHash != "" && !validHex(p.MCPTokenHash, 32)) || p.Attempts < 0 || p.Attempts > 10 || p.Window < 0 {
 		return nil, ErrState
 	}
 	if p.TemporaryGeneration == "" {

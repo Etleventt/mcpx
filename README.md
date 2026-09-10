@@ -214,6 +214,85 @@ security:
 }
 ```
 
+远程上游 MCP 支持当前 Streamable HTTP，也兼容旧 SSE。`type` 可以使用
+`http` / `streamable-http` / `sse`；只配置 `url` 时自动按 Streamable HTTP
+处理。常见的静态 Bearer Token 可以直接配置：
+
+```json
+{
+  "mcpServers": {
+    "remote": {
+      "url": "https://mcp.example.com/mcp",
+      "auth": {
+        "type": "bearer",
+        "token": "${REMOTE_MCP_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+也兼容其他 MCP 客户端常用的原始 `headers` 写法：
+
+```json
+{
+  "mcpServers": {
+    "remote": {
+      "url": "https://mcp.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${REMOTE_MCP_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+厂商 API Key 可以放 Header 或 Query。Header 示例：
+
+```json
+{
+  "mcpServers": {
+    "vendor": {
+      "url": "https://mcp.vendor.example/mcp",
+      "auth": {
+        "type": "api_key",
+        "in": "header",
+        "name": "X-API-Key",
+        "token": "${VENDOR_MCP_KEY}"
+      }
+    }
+  }
+}
+```
+
+只在厂商明确要求时使用 Query 兼容模式：
+
+```json
+{
+  "mcpServers": {
+    "vendor": {
+      "url": "https://mcp.vendor.example/mcp",
+      "auth": {
+        "type": "api_key",
+        "in": "query_param",
+        "name": "token",
+        "token": "${VENDOR_MCP_KEY}"
+      }
+    }
+  }
+}
+```
+
+也可以用 `headers`、`query` 直接表达厂商自定义方案。凭证值支持 `${ENV_VAR}`
+展开，`extension_discover` 只返回脱敏后的认证模式和 Endpoint，不返回 Header、Query
+或 Token 的真实值。带凭证的跨 Origin Redirect 会被拒绝，避免 Token 被重定向
+到其他域名。远程地址默认要求 HTTPS；仅 loopback 可直接使用 HTTP，其他明文
+HTTP 必须显式设置 `allow_insecure_http: true`。
+
+Query Token 只用于兼容第三方服务：URL 更容易进入服务端、代理或网络日志；只要
+厂商支持 Header，就优先使用 Header。标准 MCP OAuth Access Token 仍应放在
+`Authorization: Bearer ...`，不能把 OAuth Access Token 塞进 Query。
+
 ### Skill 发现
 
 默认扫描 `~/.mcpx/skills`、`~/.agents/skills`、`~/.codex/skills`、

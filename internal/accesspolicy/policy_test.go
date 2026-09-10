@@ -137,6 +137,68 @@ func TestConcurrentSingleUseAndRateLimit(t *testing.T) {
 		t.Fatalf("guess bound lost: %v", e)
 	}
 }
+func TestMCPTokenLifecycle(t *testing.T) {
+	s := testStore(t)
+	status, first, err := s.GenerateMCPToken()
+	if err != nil || !status.MCPTokenSet || !strings.HasPrefix(first, "sdt_") || len(first) < 40 {
+		t.Fatalf("generate token status=%+v token_len=%d err=%v", status, len(first), err)
+	}
+	if !s.VerifyMCPToken(first) || s.VerifyMCPToken("wrong") {
+		t.Fatal("token verification failed")
+	}
+	restarted := &Store{Home: s.Home, LegacyPassword: s.LegacyPassword}
+	if !restarted.VerifyMCPToken(first) {
+		t.Fatal("token did not survive restart")
+	}
+	status, second, err := restarted.GenerateMCPToken()
+	if err != nil || !status.MCPTokenSet || second == first {
+		t.Fatal("token rotation failed")
+	}
+	if restarted.VerifyMCPToken(first) || !restarted.VerifyMCPToken(second) {
+		t.Fatal("token rotation did not invalidate old token")
+	}
+	raw, err := os.ReadFile(filepath.Join(s.Home, "access-policy", "policy.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), first) || strings.Contains(string(raw), second) {
+		t.Fatal("MCP token persisted in plaintext")
+	}
+	status, err = restarted.RevokeMCPToken()
+	if err != nil || status.MCPTokenSet || restarted.VerifyMCPToken(second) {
+		t.Fatal("token revocation failed")
+	}
+	if _, err = restarted.Verify(restarted.LegacyPassword); err != nil {
+		t.Fatal("MCP token changes damaged OAuth access password")
+	}
+}
+
+func TestCorruptMCPTokenHashFailsClosed(t *testing.T) {
+	s := testStore(t)
+	_, token, err := s.GenerateMCPToken()
+	if err != nil || !s.VerifyMCPToken(token) {
+		t.Fatal("token setup failed")
+	}
+	path := filepath.Join(s.Home, "access-policy", "policy.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	corrupt := strings.Replace(string(raw), `"mcp_token_hash":"`, `"mcp_token_hash":"xyz`, 1)
+	if corrupt == string(raw) {
+		t.Fatal("token hash field not found")
+	}
+	if err = os.WriteFile(path, []byte(corrupt), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if s.VerifyMCPToken(token) {
+		t.Fatal("corrupted MCP token hash authorized")
+	}
+	if _, err = s.Status(); err == nil {
+		t.Fatal("corrupted MCP token hash returned status")
+	}
+}
+
 func TestCorruptionAndMissingStateFailClosed(t *testing.T) {
 	for _, kind := range []string{"corrupt", "missing", "directory"} {
 		t.Run(kind, func(t *testing.T) {

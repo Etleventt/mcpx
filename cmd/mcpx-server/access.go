@@ -27,7 +27,7 @@ func localAccess(args []string, stdin io.Reader) (map[string]any, error) {
 	bad := errors.New("invalid access operation; fixed set requires password JSON on stdin")
 	action := strings.Join(args, " ")
 	switch action {
-	case "status", "temporary create", "temporary generate --ttl 10m", "temporary revoke", "fixed set --password-stdin", "fixed generate":
+	case "status", "temporary create", "temporary generate --ttl 10m", "temporary revoke", "fixed set --password-stdin", "fixed generate", "token generate", "token revoke":
 	default:
 		return nil, bad
 	}
@@ -44,7 +44,7 @@ func localAccess(args []string, stdin io.Reader) (map[string]any, error) {
 		return nil, errors.New("device access requires an existing protected OAuth-only Runtime configuration")
 	}
 	store := &accesspolicy.Store{Home: home, LegacyPassword: strings.TrimSpace(cfg.Auth.OAuth.Password)}
-	result := map[string]any{"ok": true, "access_version": 1}
+	result := map[string]any{"ok": true, "access_version": 2}
 	var status accesspolicy.Status
 	switch action {
 	case "status":
@@ -63,6 +63,14 @@ func localAccess(args []string, stdin io.Reader) (map[string]any, error) {
 		if err == nil {
 			result["fixed_password"] = value
 		}
+	case "token generate":
+		var value string
+		status, value, err = store.GenerateMCPToken()
+		if err == nil {
+			result["mcp_token"] = value
+		}
+	case "token revoke":
+		status, err = store.RevokeMCPToken()
 	case "fixed set --password-stdin":
 		input, e := io.ReadAll(io.LimitReader(stdin, 16385))
 		if e != nil || len(input) > 16384 {

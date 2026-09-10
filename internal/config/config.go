@@ -175,12 +175,30 @@ type MCPFile struct {
 	MCPServers map[string]MCPServer `json:"mcpServers"`
 }
 
-// MCPServer describes an upstream MCP process.
+// MCPServer describes an upstream MCP server. It accepts the common
+// stdio shape as well as remote Streamable HTTP/SSE configurations used by
+// popular MCP clients. Secret-bearing values may reference ${ENV_VAR}.
 type MCPServer struct {
-	Type    string            `json:"type"`
-	Command string            `json:"command"`
-	Args    []string          `json:"args"`
-	Env     map[string]string `json:"env"`
+	Type              string            `json:"type,omitempty"`
+	Command           string            `json:"command,omitempty"`
+	Args              []string          `json:"args,omitempty"`
+	Env               map[string]string `json:"env,omitempty"`
+	URL               string            `json:"url,omitempty"`
+	Headers           map[string]string `json:"headers,omitempty"`
+	Query             map[string]string `json:"query,omitempty"`
+	Auth              *MCPAuthConfig    `json:"auth,omitempty"`
+	AllowInsecureHTTP bool              `json:"allow_insecure_http,omitempty"`
+}
+
+// MCPAuthConfig is a convenience layer over Headers/Query for user-facing
+// configuration. bearer maps to Authorization: Bearer <token>. api_key can be
+// placed in a custom header or query parameter. Raw Headers/Query remain
+// available as a compatibility escape hatch for vendor-specific schemes.
+type MCPAuthConfig struct {
+	Type  string `json:"type,omitempty"` // none | bearer | api_key
+	Token string `json:"token,omitempty"`
+	In    string `json:"in,omitempty"` // header | query
+	Name  string `json:"name,omitempty"`
 }
 
 // DefaultConfig returns built-in defaults per PRD.

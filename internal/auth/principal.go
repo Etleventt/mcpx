@@ -24,6 +24,8 @@ func PrincipalFromCredentials(credentials Credentials, authorizationHeader strin
 		return hashedPrincipal("oauth", subject)
 	case "static":
 		return hashedPrincipal("bearer", bearerToken(authorizationHeader))
+	case "mcp_token":
+		return hashedPrincipal("mcp_token", credentials.Subject)
 	default:
 		return hashedPrincipal("local", "default")
 	}

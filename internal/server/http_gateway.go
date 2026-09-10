@@ -79,14 +79,22 @@ func (g *Gateway) wrapMCP(next http.Handler) http.Handler {
 			resource = issuer + "/mcp"
 		}
 
+		authorizationHeader := r.Header.Get("Authorization")
 		cred := auth.ValidateHTTP(
-			r.Header.Get("Authorization"),
+			authorizationHeader,
 			mode,
 			strings.TrimSpace(g.cfg.Auth.Token),
 			g.oauth,
 			issuer,
 			resource,
 		)
+		principal := auth.Principal{}
+		if cred.OK {
+			principal = auth.PrincipalFromCredentials(cred, authorizationHeader)
+		} else if token := g.validDeviceMCPToken(r); token != "" {
+			cred = auth.Credentials{OK: true, Source: "mcp_token", Subject: token}
+			principal = auth.PrincipalFromCredentials(cred, "")
+		}
 		if !cred.OK {
 			authHeader := r.Header.Get("Authorization")
 			logging.L().Info("mcp auth denied",
@@ -104,10 +112,30 @@ func (g *Gateway) wrapMCP(next http.Handler) http.Handler {
 		}
 		// Inject auth + runtime context for tool handlers (official SDK has no
 		// WithHTTPContextFunc equivalent on StreamableHTTPHandler).
-		ctx := auth.ContextWithAuthorization(r.Context(), r.Header.Get("Authorization"))
+		ctx := auth.ContextWithAuthorization(r.Context(), authorizationHeader)
+		ctx = auth.ContextWithPrincipal(ctx, principal)
 		ctx, _ = ensureRuntimeContext(ctx, r.Header, time.Now())
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (g *Gateway) validDeviceMCPToken(r *http.Request) string {
+	if g.oauth == nil || g.oauth.Access == nil || r == nil {
+		return ""
+	}
+	candidates := []string{}
+	if header := strings.TrimSpace(r.Header.Get("Authorization")); strings.HasPrefix(header, "Bearer ") {
+		candidates = append(candidates, strings.TrimSpace(strings.TrimPrefix(header, "Bearer ")))
+	}
+	if key := strings.TrimSpace(r.Header.Get("X-API-Key")); key != "" {
+		candidates = append(candidates, key)
+	}
+	for _, token := range candidates {
+		if g.oauth.Access.VerifyMCPToken(token) {
+			return token
+		}
+	}
+	return ""
 }
 
 func (g *Gateway) origin(r *http.Request) string {
@@ -159,6 +187,6 @@ func (g *Gateway) applyCORS(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Vary", "Origin")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Mcp-Session-Id, MCP-Protocol-Version, Accept, X-Request-ID, X-MCPX-Request-ID, Traceparent, X-MCPX-Trace-ID, X-MCPX-Span-ID, X-MCPX-Started-At-Ms")
+	w.Header().Set("Access-Control-Allow-Headers", "Authorization, X-API-Key, Content-Type, Mcp-Session-Id, MCP-Protocol-Version, Accept, X-Request-ID, X-MCPX-Request-ID, Traceparent, X-MCPX-Trace-ID, X-MCPX-Span-ID, X-MCPX-Started-At-Ms")
 	w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id, X-Request-ID, X-MCPX-Trace-ID, X-MCPX-Span-ID")
 }

@@ -220,7 +220,7 @@ func TestAccessMetadataCapability(t *testing.T) {
 	s := accessServer(t)
 	w := httptest.NewRecorder()
 	(&Handler{S: s}).HandleAuthorizationServerMetadata(w, httptest.NewRequest(http.MethodGet, "/", nil))
-	if !strings.Contains(w.Body.String(), `"subdesk_access_policy":1`) {
-		t.Fatal("running enforcement capability missing")
+	if !strings.Contains(w.Body.String(), `"subdesk_access_policy":2`) || !strings.Contains(w.Body.String(), `"subdesk_mcp_token_headers"`) || !strings.Contains(w.Body.String(), `"X-API-Key"`) {
+		t.Fatal("running access and MCP token capability missing")
 	}
 }
