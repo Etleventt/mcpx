@@ -87,6 +87,14 @@ func matchSegment(rules config.CommandRules, segment string, trusted bool) Decis
 		return Confirm
 	}
 	if matchAny(rules.Allow, segment) {
+		// Previously persisted configs allow broad "^git diff"/"^git status"
+		// rules. Such prefixes must not bypass the Git read-only whitelist.
+		if isGitInspectionSegment(segment) && !isReadonlySegment(segment) {
+			if trusted {
+				return Allow
+			}
+			return Confirm
+		}
 		return Allow
 	}
 	if autoAllowReadonlyEnabled(rules) && isReadonlyCommand(segment) {
@@ -169,18 +177,16 @@ func isReadonlySegment(segment string) bool {
 	return false
 }
 
-// isReadonlyGit accepts git -C <relative-path> <status|diff|log|show> and the
-// bare <status|diff|log|show> forms. -C targets must be relative workspace
-// paths.
-func isReadonlyGit(args []string) bool {
-	for len(args) > 0 {
-		if args[0] != "-C" {
-			break
-		}
+// isGitInspectionSegment recognizes the Git subcommands historically covered
+// by broad allow patterns, including one or more -C workspace prefixes.
+func isGitInspectionSegment(segment string) bool {
+	args := strings.Fields(strings.TrimSpace(segment))
+	if len(args) < 2 || args[0] != "git" {
+		return false
+	}
+	args = args[1:]
+	for len(args) > 0 && args[0] == "-C" {
 		if len(args) < 2 {
-			return false
-		}
-		if !safeReadonlyArgument(args[1]) {
 			return false
 		}
 		args = args[2:]
@@ -190,9 +196,105 @@ func isReadonlyGit(args []string) bool {
 	}
 	switch args[0] {
 	case "status", "diff", "log", "show":
-		return allReadonlyArguments(args[1:])
+		return true
 	}
 	return false
+}
+
+// isReadonlyGit only auto-approves known non-writing Git options. Generic
+// argument character checks are insufficient: e.g. git diff --output=path
+// writes to disk, and --ext-diff may execute an external program.
+func isReadonlyGit(args []string) bool {
+	for len(args) > 0 && args[0] == "-C" {
+		if len(args) < 2 || !safeReadonlyArgument(args[1]) || strings.HasPrefix(args[1], "-") {
+			return false
+		}
+		args = args[2:]
+	}
+	if len(args) == 0 {
+		return false
+	}
+	command := args[0]
+	switch command {
+	case "status", "diff", "log", "show":
+	default:
+		return false
+	}
+	paths := false
+	for _, arg := range args[1:] {
+		if !safeReadonlyArgument(arg) {
+			return false
+		}
+		if arg == "--" {
+			paths = true
+			continue
+		}
+		if paths || !strings.HasPrefix(arg, "-") {
+			continue
+		}
+		if !safeReadonlyGitOption(command, arg) {
+			return false
+		}
+	}
+	return true
+}
+
+func safeReadonlyGitOption(command, arg string) bool {
+	// Reject all unknown options, especially --output, --ext-diff,
+	// --textconv and pager/config/exec hooks.
+	switch command {
+	case "status":
+		switch arg {
+		case "-s", "-b", "-sb", "--short", "--branch", "--porcelain",
+			"--porcelain=v1", "--porcelain=v2", "--ignored", "--show-stash",
+			"--ahead-behind", "--no-ahead-behind", "--renames", "--no-renames",
+			"-uno", "--untracked-files=all", "--untracked-files=normal",
+			"--untracked-files=no":
+			return true
+		}
+	case "diff", "log", "show":
+		switch arg {
+		case "--stat", "--shortstat", "--numstat", "--name-only", "--name-status",
+			"--check", "--no-color", "--color=never", "--no-ext-diff",
+			"--no-textconv", "--oneline", "--no-renames", "--raw":
+			return true
+		}
+		if command == "diff" && (arg == "--cached" || arg == "--staged" ||
+			arg == "-w" || arg == "--ignore-space-at-eol") {
+			return true
+		}
+		if (command == "log" || command == "show") &&
+			(arg == "--pretty=oneline" || arg == "--format=oneline" ||
+				arg == "--pretty=short" || arg == "--format=short" ||
+				arg == "--decorate" || arg == "--no-decorate") {
+			return true
+		}
+		if strings.HasPrefix(arg, "-U") && len(arg) > 2 {
+			return allDigits(arg[2:])
+		}
+		if strings.HasPrefix(arg, "--unified=") {
+			return allDigits(strings.TrimPrefix(arg, "--unified="))
+		}
+		if (command == "log" || command == "show") && strings.HasPrefix(arg, "-n") {
+			return allDigits(strings.TrimPrefix(arg, "-n"))
+		}
+		if (command == "log" || command == "show") && strings.HasPrefix(arg, "--max-count=") {
+			return allDigits(strings.TrimPrefix(arg, "--max-count="))
+		}
+	}
+	return false
+}
+
+func allDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, c := range value {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func allReadonlyArguments(args []string) bool {

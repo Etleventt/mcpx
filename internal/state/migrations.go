@@ -396,6 +396,11 @@ var migrations = []string{
 	`ALTER TABLE changesets ADD COLUMN discarded_at INTEGER;`,
 	`ALTER TABLE remote_sessions ADD COLUMN approval_mode TEXT NOT NULL DEFAULT 'standard'
 		CHECK (approval_mode IN ('standard','trusted'));`,
+	`CREATE TABLE IF NOT EXISTS artifact_blobs (
+		artifact_id TEXT PRIMARY KEY,
+		content BLOB NOT NULL,
+		FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE
+	);`,
 }
 
 func applyMigrations(ctx context.Context, db *sql.DB) error {

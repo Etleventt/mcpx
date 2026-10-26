@@ -150,6 +150,9 @@ func (s *Service) Read(ctx context.Context, remoteSessionID, artifactID, workspa
 	if err != nil {
 		return ReadResult{}, err
 	}
+	if artifact.Path == "" {
+		return s.readBlob(ctx, artifact, offset, limit)
+	}
 	absolute, err := file.Resolve(workspaceRoot, artifact.Path)
 	if err != nil {
 		return ReadResult{}, err
@@ -194,6 +197,17 @@ func (s *Service) ReadAll(ctx context.Context, remoteSessionID, artifactID, work
 	}
 	if artifact.Size > maxBytes {
 		return Artifact{}, nil, fmt.Errorf("artifact exceeds resource limit; use artifact_read")
+	}
+	if artifact.Path == "" {
+		content, exists, err := s.blobContent(ctx, artifactID)
+		if err != nil || !exists {
+			return Artifact{}, nil, fmt.Errorf("artifact blob missing: %w", err)
+		}
+		digest := sha256.Sum256(content)
+		if "sha256:"+hex.EncodeToString(digest[:]) != artifact.SHA256 {
+			return Artifact{}, nil, ErrChanged
+		}
+		return artifact, content, nil
 	}
 	absolute, err := file.Resolve(workspaceRoot, artifact.Path)
 	if err != nil {

@@ -36,6 +36,12 @@ func PresentText(path string, content []byte, registeredMIME string) TextPresent
 	rawMIME = stripCharset(rawMIME)
 
 	out := TextPresentation{Format: format, RawMIME: rawMIME}
+	// A known image MIME must stay binary even when its bytes happen to form
+	// valid UTF-8 (e.g. small synthetic screenshot fixtures).
+	if strings.HasPrefix(strings.ToLower(rawMIME), "image/") {
+		out.MIME = rawMIME
+		return out
+	}
 	utf8Body, ok := decodeToUTF8(content, format)
 	if !ok {
 		out.MIME = rawMIME

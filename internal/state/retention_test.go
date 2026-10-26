@@ -257,6 +257,69 @@ func TestRetentionDeletesExpiredOperationsOnlyForClosedSessions(t *testing.T) {
 	}
 }
 
+func TestRetentionRemovesExpiredAutomaticScreenshots(t *testing.T) {
+	db, service, now := newRetentionTestService(t, "")
+	insertRetentionPrincipal(t, db, "principal")
+	insertRetentionSession(t, db, "active", "demo", "active", "principal")
+	old := now.Add(-config.AutoScreenshotRetention - time.Hour).UnixMilli()
+	recent := now.Add(-time.Hour).UnixMilli()
+	_, err := db.Exec(`INSERT INTO artifacts
+		(id, remote_session_id, name, kind, path, mime_type, size, sha256, created_by, created_at)
+		VALUES
+		('old-screenshot', 'active', 'Screenshot', 'screenshot', '', 'image/png', 3, 'sha256:old', 'principal', ?),
+		('fresh-screenshot', 'active', 'Screenshot', 'screenshot', '', 'image/png', 3, 'sha256:new', 'principal', ?),
+		('pinned-screenshot', 'active', 'Screenshot', 'screenshot', '', 'image/png', 3, 'sha256:pinned', 'principal', ?),
+		('manual-screenshot', 'active', 'Screenshot', 'screenshot', 'image.png', 'image/png', 3, 'sha256:old', 'principal', ?)`, old, recent, old, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO artifact_blobs(artifact_id, content) VALUES
+		('old-screenshot', x'010203'), ('fresh-screenshot', x'010203'), ('pinned-screenshot', x'010203')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO plans(id, remote_session_id, goal, status, created_by, created_at, updated_at)
+		VALUES ('plan', 'active', 'retain evidence', 'ready', 'principal', 1, 1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO plan_tasks(id, plan_id, ordinal, title, status, created_at, updated_at)
+		VALUES ('task', 'plan', 0, 'keep screenshot', 'todo', 1, 1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO plan_task_evidence(id, plan_id, task_id, kind, reference_id, created_by, created_at)
+		VALUES ('evidence', 'plan', 'task', 'artifact', 'pinned-screenshot', 'principal', 1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := service.RunOnce(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.DeletedScreenshots != 1 || report.TotalDeleted() != 1 {
+		t.Fatalf("unexpected screenshot retention result: %+v", report)
+	}
+	for id, want := range map[string]int{
+		"old-screenshot": 0, "fresh-screenshot": 1, "pinned-screenshot": 1, "manual-screenshot": 1,
+	} {
+		var count int
+		if err := db.QueryRow("SELECT COUNT(*) FROM artifacts WHERE id = ?", id).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != want {
+			t.Errorf("artifact %s count=%d want=%d", id, count, want)
+		}
+	}
+	var oldBlobCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM artifact_blobs WHERE artifact_id = 'old-screenshot'").Scan(&oldBlobCount); err != nil {
+		t.Fatal(err)
+	}
+	if oldBlobCount != 0 {
+		t.Fatal("expired screenshot blob remains")
+	}
+}
+
 func TestRetentionTaskLogFailureKeepsRow(t *testing.T) {
 	logDir := t.TempDir()
 	db, service, now := newRetentionTestService(t, logDir)

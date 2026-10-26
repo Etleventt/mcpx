@@ -365,6 +365,9 @@ func buildOAuthServer(cfg *config.Config) (*oauth.Server, error) {
 	}
 	srv := oauth.NewServer(password, strings.TrimSpace(cfg.Auth.OAuth.ServerURL), secret, config.OAuthTokenTTL(cfg.Auth.OAuth))
 	srv.Access = &accesspolicy.Store{Home: home, LegacyPassword: password}
+	if err := srv.SetRefreshPersistPath(filepath.Join(home, "oauth-refresh-grants.json")); err != nil {
+		return nil, fmt.Errorf("restore OAuth refresh grants: %w", err)
+	}
 	// Persist DCR clients so restart does not break ChatGPT "reconnect".
 	persist := filepath.Join(home, "oauth-clients.json")
 	if err := srv.Registry.SetPersistPath(persist); err != nil {
@@ -584,6 +587,7 @@ func (r *Runtime) runRetention(ctx context.Context) {
 		"environment_snapshots", report.DeletedEnvironmentSnaps,
 		"ephemeral_records", report.DeletedEphemeralRecords,
 		"operations", report.DeletedOperations,
+		"screenshots", report.DeletedScreenshots,
 		"vacuumed", report.Vacuumed,
 	)
 }

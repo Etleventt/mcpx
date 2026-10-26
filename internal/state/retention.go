@@ -33,6 +33,7 @@ type RetentionReport struct {
 	DeletedEnvironmentSnaps  int
 	DeletedEphemeralRecords  int
 	DeletedOperations        int
+	DeletedScreenshots       int
 	Vacuumed                 bool
 	Errors                   []string
 }
@@ -113,6 +114,13 @@ func (s *RetentionService) RunOnce(ctx context.Context) (RetentionReport, error)
 	report.DeletedFileSnapshots += snapshotCounts.file
 	report.DeletedEnvironmentSnaps += snapshotCounts.environment
 
+	// Remove expired automatic screenshots even when no new capture arrives.
+	deleted, err = s.deleteExpiredScreenshots(ctx, now.Add(-config.AutoScreenshotRetention))
+	if err != nil {
+		return report, err
+	}
+	report.DeletedScreenshots += deleted
+
 	busy, err := s.checkpoint(ctx)
 	if err != nil {
 		report.Errors = append(report.Errors, fmt.Sprintf("wal checkpoint: %v", err))
@@ -135,7 +143,22 @@ func (s *RetentionService) checkpoint(ctx context.Context) (bool, error) {
 
 // TotalDeleted returns the number of rows removed in this pass.
 func (r RetentionReport) TotalDeleted() int {
-	return r.DeletedObservationEvents + r.DeletedTerminalTasks + r.DeletedFileSnapshots + r.DeletedEnvironmentSnaps + r.DeletedEphemeralRecords + r.DeletedOperations
+	return r.DeletedObservationEvents + r.DeletedTerminalTasks + r.DeletedFileSnapshots + r.DeletedEnvironmentSnaps + r.DeletedEphemeralRecords + r.DeletedOperations + r.DeletedScreenshots
+}
+
+func (s *RetentionService) deleteExpiredScreenshots(ctx context.Context, cutoff time.Time) (int, error) {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM artifacts WHERE id IN (
+		SELECT a.id FROM artifacts a
+		WHERE a.kind = 'screenshot' AND a.path = '' AND a.created_at < ?
+		  AND NOT EXISTS (SELECT 1 FROM plan_task_evidence e
+		                  WHERE e.kind = 'artifact' AND e.reference_id = a.id)
+		ORDER BY a.created_at, a.id LIMIT ?
+	)`, cutoff.UnixMilli(), retentionBatchSize)
+	if err != nil {
+		return 0, fmt.Errorf("delete expired screenshots: %w", err)
+	}
+	count, err := result.RowsAffected()
+	return int(count), err
 }
 
 func (s *RetentionService) deleteExpiredOperations(ctx context.Context, now int64) (int, error) {

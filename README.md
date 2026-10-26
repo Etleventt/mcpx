@@ -652,7 +652,7 @@ ANSI 16 色。设置 `NO_COLOR=1` 关闭颜色，`COLORTERM=truecolor` 或 `24bi
 - `secret_provide` 的明文值只在进程内短期使用，不写入 SQLite、Workspace 或日志。
 - SQLite、Task 日志、OAuth 客户端注册和 Token 密钥位于 `~/.mcpx/`，运行时使用
   受限文件权限；不要把真实 Token、密码或 Secret 写入仓库和命令字符串。
-- 截图默认通过 MCP 返回，不写入 Workspace 或 SQLite。
+- 截图通过 MCP 返回图片，并在本机 SQLite 保存短期恢复副本（不写入 Workspace）。未被计划引用的自动截图最多保留最近 32 张和 48 小时；超出 8 MiB 或存储失败时仍返回图片，但不提供恢复副本。
 - `state.retention` 会清理过期过程事件、Task、快照和临时记录，但保护活跃会话
   和未完成交付状态。
 

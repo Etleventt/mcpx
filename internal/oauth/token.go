@@ -32,9 +32,10 @@ type Server struct {
 	passwordWindow   time.Time
 	passwordAttempts int
 
-	mu      sync.Mutex
-	codes   map[string]*authCode
-	refresh map[string]*refreshGrant
+	mu                 sync.Mutex
+	codes              map[string]*authCode
+	refresh            map[string]*refreshGrant
+	refreshPersistPath string
 }
 
 type authCode struct {
@@ -278,71 +279,96 @@ func (s *Server) issueRefresh(clientID, resource, scope string, grant accesspoli
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.pruneRefreshLocked()
-	if len(s.refresh) >= MaxRefreshTokens {
-		// Evict the oldest grant so a busy deployment cannot block reconnects.
-		var oldestKey string
-		var oldest time.Time
-		for k, g := range s.refresh {
-			if oldestKey == "" || g.ExpiresAt.Before(oldest) {
-				oldestKey, oldest = k, g.ExpiresAt
-			}
+	var token string
+	err := s.withRefreshStoreLocked(func() error {
+		// A credential can be revoked while waiting for the process lock.
+		if !s.validGrant(grant) || !time.Now().Before(expiry) {
+			return fmt.Errorf("invalid_grant")
 		}
-		if oldestKey != "" {
+		previous := cloneRefresh(s.refresh)
+		s.pruneRefreshLocked()
+		if len(s.refresh) >= MaxRefreshTokens {
+			var oldestKey string
+			var oldest time.Time
+			for k, g := range s.refresh {
+				if oldestKey == "" || g.ExpiresAt.Before(oldest) {
+					oldestKey, oldest = k, g.ExpiresAt
+				}
+			}
 			delete(s.refresh, oldestKey)
 		}
+		if scope == "" {
+			scope = DefaultScope
+		}
+		token = TokenURLSafe(32)
+		for s.refresh[refreshID(token)] != nil {
+			token = TokenURLSafe(32)
+		}
+		s.refresh[refreshID(token)] = &refreshGrant{
+			Grant: grant, ClientID: clientID, Resource: resource, Scope: scope, ExpiresAt: expiry,
+		}
+		if err := s.persistRefreshLocked(); err != nil {
+			s.refresh = previous
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return ""
 	}
-	if scope == "" {
-		scope = DefaultScope
-	}
-	tok := TokenURLSafe(32)
-	for s.refresh[tok] != nil {
-		tok = TokenURLSafe(32)
-	}
-	s.refresh[tok] = &refreshGrant{
-		Grant:     grant,
-		ClientID:  clientID,
-		Resource:  resource,
-		Scope:     scope,
-		ExpiresAt: expiry,
-	}
-	return tok
+	return token
 }
 
 // ExchangeRefreshToken rotates a refresh token and mints a new access token.
+// Both consumption and replacement are committed under a cross-process lock.
 func (s *Server) ExchangeRefreshToken(refreshToken, clientID, resource string) (string, int, string, error) {
 	s.mu.Lock()
-	g, ok := s.refresh[refreshToken]
-	if ok {
-		delete(s.refresh, refreshToken)
-	}
-	s.mu.Unlock()
-	if !ok || !time.Now().Before(g.ExpiresAt) || !s.validGrant(g.Grant) || (resource != "" && g.Resource != "" && resource != g.Resource) {
-		return "", 0, "", fmt.Errorf("invalid_grant")
-	}
-	if g.ClientID != clientID {
-		return "", 0, "", fmt.Errorf("invalid_grant")
-	}
-	res := g.Resource
-	if resource != "" {
-		res = resource
-	}
-	issuer := s.EffectiveIssuer("")
-	if issuer == "" {
-		issuer = issuerFromResource(res)
-	}
-	if res == "" {
-		res = s.ResourceURL(issuer)
-	}
-	tok, ttl, err := s.createAccessToken(clientID, res, issuer, g.Grant)
+	defer s.mu.Unlock()
+	var token, next string
+	var ttl int
+	err := s.withRefreshStoreLocked(func() error {
+		key := refreshID(refreshToken)
+		g, ok := s.refresh[key]
+		if !ok || !time.Now().Before(g.ExpiresAt) || !s.validGrant(g.Grant) ||
+			(resource != "" && g.Resource != "" && resource != g.Resource) || g.ClientID != clientID {
+			return fmt.Errorf("invalid_grant")
+		}
+		res := g.Resource
+		if resource != "" {
+			res = resource
+		}
+		issuer := s.EffectiveIssuer("")
+		if issuer == "" {
+			issuer = issuerFromResource(res)
+		}
+		if res == "" {
+			res = s.ResourceURL(issuer)
+		}
+		accessToken, accessTTL, err := s.createAccessToken(clientID, res, issuer, g.Grant)
+		if err != nil {
+			return err
+		}
+		previous := cloneRefresh(s.refresh)
+		s.pruneRefreshLocked()
+		delete(s.refresh, key)
+		candidate := TokenURLSafe(32)
+		for s.refresh[refreshID(candidate)] != nil {
+			candidate = TokenURLSafe(32)
+		}
+		grantCopy := *g
+		grantCopy.Resource = res
+		s.refresh[refreshID(candidate)] = &grantCopy
+		if err := s.persistRefreshLocked(); err != nil {
+			s.refresh = previous
+			return fmt.Errorf("refresh grant persistence failed: %w", err)
+		}
+		token, ttl, next = accessToken, accessTTL, candidate
+		return nil
+	})
 	if err != nil {
 		return "", 0, "", err
 	}
-	next := s.issueRefresh(clientID, res, g.Scope, g.Grant, g.ExpiresAt)
-	if next == "" {
-		return "", 0, "", fmt.Errorf("invalid_grant")
-	}
-	return tok, ttl, next, nil
+	return token, ttl, next, nil
 }
 
 func issuerFromResource(resource string) string {

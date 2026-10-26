@@ -45,6 +45,13 @@ func TestPresentTextUTF16LE(t *testing.T) {
 	}
 }
 
+func TestPresentTextImageIsAlwaysBinary(t *testing.T) {
+	pres := PresentText("", []byte{1, 2, 3, 4}, "image/jpeg")
+	if pres.OK || pres.RawMIME != "image/jpeg" {
+		t.Fatalf("image incorrectly treated as text: %+v", pres)
+	}
+}
+
 func TestPresentTextBinaryBlob(t *testing.T) {
 	content := []byte{0x00, 0x01, 0xff, 0xfe, 0x80}
 	pres := PresentText("blob.bin", content, "application/octet-stream")

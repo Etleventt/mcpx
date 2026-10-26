@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+// Automatic screenshots are short-lived recovery copies, not permanent project
+// evidence. Shared between artifact writes and periodic state retention.
+const (
+	AutoScreenshotRetention = 48 * time.Hour
+	AutoScreenshotMaxRows   = 32
+)
+
 // ValidateRetention validates the effective global retention configuration.
 func ValidateRetention(c RetentionConfig) error {
 	for name, value := range map[string]string{

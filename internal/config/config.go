@@ -230,8 +230,6 @@ func DefaultConfig() Config {
 				Allow: []string{
 					`^ls\b`,
 					`^pwd$`,
-					`^git status`,
-					`^git diff`,
 					`^npm test`,
 					`^echo\b`,
 				},
